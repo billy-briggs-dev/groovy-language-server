@@ -44,11 +44,11 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - Multi-module Maven projects
   
 - [ ] **Grails support** (#41)
-  - Grails project detection
-  - Domain class intelligence
-  - GORM support
-  - GSP template support
-  - Avoid duplicate class definitions from build output
+  - [x] Grails project detection
+  - [ ] Domain class intelligence
+  - [ ] GORM support
+  - [ ] GSP template support
+  - [x] Avoid duplicate class definitions from build output
 
 ### 3. **Semantic Analysis**
 - [x] **Undefined variable detection** (#95)

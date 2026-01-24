@@ -161,6 +161,8 @@ import net.prominic.groovyls.util.GradleClasspathResolver;
 import net.prominic.groovyls.util.GradleProjectDetector;
 import net.prominic.groovyls.util.GradleProjectInfo;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
+import net.prominic.groovyls.util.GrailsProjectDetector;
+import net.prominic.groovyls.util.GrailsProjectInfo;
 import net.prominic.groovyls.util.MavenProjectDetector;
 import net.prominic.groovyls.util.MavenProjectInfo;
 import net.prominic.groovyls.util.MavenDependencyResolver;
@@ -197,6 +199,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private GroovyClassLoader classLoader = null;
 	private URI previousContext = null;
 	private GradleProjectInfo gradleProjectInfo;
+	private GrailsProjectInfo grailsProjectInfo;
 	private List<String> userClasspathList = new ArrayList<>();
 	private List<String> gradleClasspathList = Collections.emptyList();
 	private List<String> gradleClasspathScopes = new ArrayList<>();
@@ -238,6 +241,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		this.workspaceRoot = workspaceRoot;
 		createOrUpdateCompilationUnit();
 		detectGradleProject();
+		detectGrailsProject();
 	}
 
 	@Override
@@ -286,6 +290,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	@Override
 	public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
 		detectGradleProject();
+		detectGrailsProject();
 		scheduleMavenIndexing();
 		synchronized (compileOperationLock) {
 			boolean isSameUnit = createOrUpdateCompilationUnit();
@@ -356,7 +361,11 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		gradleIncludeBuildscript = nextGradleIncludeBuildscript;
 
 		compilationUnitFactory.setExcludePatterns(excludePatterns);
-		compilationUnitFactory.setSourceRoots(sourceRoots);
+		if (sourceRoots == null || sourceRoots.isEmpty()) {
+			compilationUnitFactory.setSourceRoots(getDetectedSourceRoots());
+		} else {
+			compilationUnitFactory.setSourceRoots(sourceRoots);
+		}
 		compilationUnitFactory.setClasspathRecursive(classpathRecursive);
 
 		applyEffectiveClasspathAsync();
@@ -378,6 +387,36 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				previousContext = null;
 			}
 		}
+	}
+
+	private void detectGrailsProject() {
+		grailsProjectInfo = GrailsProjectDetector.detect(workspaceRoot);
+		if ((sourceRoots == null || sourceRoots.isEmpty()) && grailsProjectInfo != null) {
+			compilationUnitFactory.setSourceRoots(getDetectedSourceRoots());
+			synchronized (compileOperationLock) {
+				boolean isSameUnit = createOrUpdateCompilationUnit();
+				compile();
+				if (isSameUnit) {
+					visitAST();
+				} else {
+					visitAST();
+				}
+				previousContext = null;
+			}
+		}
+	}
+
+	private List<String> getDetectedSourceRoots() {
+		if (grailsProjectInfo == null || grailsProjectInfo.getSourceRoots().isEmpty()) {
+			return Collections.emptyList();
+		}
+		List<String> roots = new ArrayList<>();
+		for (Path root : grailsProjectInfo.getSourceRoots()) {
+			if (root != null) {
+				roots.add(root.toString());
+			}
+		}
+		return roots;
 	}
 
 	private List<String> readStringArray(JsonObject parent, String key) {
