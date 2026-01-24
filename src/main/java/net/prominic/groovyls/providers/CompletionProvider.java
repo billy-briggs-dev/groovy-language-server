@@ -66,6 +66,13 @@ import net.prominic.groovyls.compiler.util.GroovydocUtils;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 
 public class CompletionProvider {
+	private static final List<String> KEYWORDS = Arrays.asList(
+			"abstract", "as", "assert", "break", "case", "catch", "class", "continue", "def", "default",
+			"do", "else", "enum", "extends", "false", "final", "for", "if", "implements", "import",
+			"in", "instanceof", "interface", "native", "new", "null", "package", "private", "protected",
+			"public", "return", "static", "strictfp", "super", "switch", "synchronized", "this", "throw",
+			"throws", "trait", "transient", "true", "try", "volatile", "while");
+
 	private ASTNodeVisitor ast;
 	private ScanResult classGraphScanResult;
 	private int maxItemCount = 1000;
@@ -396,7 +403,22 @@ public class CompletionProvider {
 			}
 			current = ast.getParent(current);
 		}
+		populateKeywordItems(namePrefix, existingNames, items);
 		populateTypes(node, namePrefix, existingNames, items);
+	}
+
+	private void populateKeywordItems(String namePrefix, Set<String> existingNames, List<CompletionItem> items) {
+		String prefix = namePrefix == null ? "" : namePrefix;
+		for (String keyword : KEYWORDS) {
+			if (!keyword.startsWith(prefix) || existingNames.contains(keyword)) {
+				continue;
+			}
+			CompletionItem item = new CompletionItem();
+			item.setLabel(keyword);
+			item.setKind(CompletionItemKind.Keyword);
+			items.add(item);
+			existingNames.add(keyword);
+		}
 	}
 
 	private void populateTypes(ASTNode offsetNode, String namePrefix, Set<String> existingNames,
