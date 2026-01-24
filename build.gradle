@@ -8,6 +8,10 @@ java {
   targetCompatibility = JavaVersion.VERSION_21
 }
 
+tasks.withType(JavaCompile).configureEach {
+  options.compilerArgs << "-Xlint:deprecation"
+}
+
 test {
   useJUnitPlatform()
 }
@@ -24,7 +28,7 @@ shadowJar {
 
 repositories  {
   mavenCentral()
-  maven { url "https://repo.gradle.org/gradle/libs-releases" }
+  maven { url = "https://repo.gradle.org/gradle/libs-releases" }
 }
 
 dependencies {
@@ -32,7 +36,7 @@ dependencies {
   implementation "org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc:0.24.0"
   implementation "org.apache.groovy:groovy:4.0.26"
   implementation "com.google.code.gson:gson:2.13.1"
-  implementation "io.github.classgraph:classgraph:4.8.179"
+  implementation "io.github.classgraph:classgraph:4.8.184"
   implementation "org.gradle:gradle-tooling-api:9.3.0"
   testImplementation platform("org.junit:junit-bom:5.11.4")
   testImplementation "org.junit.jupiter:junit-jupiter-api"

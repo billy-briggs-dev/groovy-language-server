@@ -151,6 +151,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	}
 
 	private static final Pattern PATTERN_CONSTRUCTOR_CALL = Pattern.compile(".*new \\w*$");
+	private static final Pattern PATTERN_IMPORT_STATEMENT = Pattern
+			.compile("^\\s*import\\s+(?:static\\s+)?([^\\s;]+)(?:\\s+as\\s+(\\w+))?\\s*;?\\s*$");
+	private static final Pattern PATTERN_UNNECESSARY_SEMICOLON = Pattern.compile("^\\s*;\\s*$");
 	private static final long DIAGNOSTIC_DEBOUNCE_MS = 250;
 	private static final int DUPLICATE_CODE_MIN_LENGTH = 10;
 	private static final int MAX_LINE_LENGTH = 120;
@@ -291,9 +294,13 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			Matcher matcher = PATTERN_CONSTRUCTOR_CALL.matcher(lineBeforeOffset);
 			TextDocumentContentChangeEvent changeEvent = null;
 			if (matcher.matches()) {
-				changeEvent = new TextDocumentContentChangeEvent(new Range(position, position), 0, "a()");
+				changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(new Range(position, position));
+				changeEvent.setText("a()");
 			} else {
-				changeEvent = new TextDocumentContentChangeEvent(new Range(position, position), 0, "a");
+				changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(new Range(position, position));
+				changeEvent.setText("a");
 			}
 			DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 					Collections.singletonList(changeEvent));
@@ -316,8 +323,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			if (originalSource != null) {
 				VersionedTextDocumentIdentifier versionedTextDocument = new VersionedTextDocumentIdentifier(
 						textDocument.getUri(), 1);
-				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent(null, 0,
-						originalSource);
+				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(null);
+				changeEvent.setText(originalSource);
 				DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 						Collections.singletonList(changeEvent));
 				applyDidChangeAndCompileNow(didChangeParams);
@@ -351,8 +359,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			originalSource = fileContentsTracker.getContents(uri);
 			VersionedTextDocumentIdentifier versionedTextDocument = new VersionedTextDocumentIdentifier(
 					textDocument.getUri(), 1);
-			TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent(
-					new Range(position, position), 0, ")");
+			TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent();
+			changeEvent.setRange(new Range(position, position));
+			changeEvent.setText(")");
 			DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 					Collections.singletonList(changeEvent));
 			// if the offset node is null, there is probably a syntax error.
@@ -373,8 +382,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			if (originalSource != null) {
 				VersionedTextDocumentIdentifier versionedTextDocument = new VersionedTextDocumentIdentifier(
 						textDocument.getUri(), 1);
-				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent(null, 0,
-						originalSource);
+				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(null);
+				changeEvent.setText(originalSource);
 				DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 						Collections.singletonList(changeEvent));
 				applyDidChangeAndCompileNow(didChangeParams);
@@ -416,7 +426,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			WorkspaceSymbolParams params) {
 		ensureAstAvailable();
 		WorkspaceSymbolProvider provider = new WorkspaceSymbolProvider(astVisitor);
-		return provider.provideWorkspaceSymbols(params.getQuery()).thenApply(Either::forLeft);
+		return provider.provideWorkspaceSymbols(params.getQuery()).thenApply(Either::forRight);
 	}
 
 	@Override
@@ -480,6 +490,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				try {
 					classGraphScanResult = new ClassGraph().overrideClassLoaders(classLoader).enableClassInfo()
 							.enableSystemJarsAndModules()
+							.setMaxBufferedJarRAMSize(Integer.MAX_VALUE)
 							.scan();
 				} catch (ClassGraphException e) {
 					classGraphScanResult = null;
@@ -748,7 +759,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		}
 	}
 
-	private void collectCodeInspectionDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, ASTNodeVisitor visitor) {
+	private void collectCodeInspectionDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile,
+			ASTNodeVisitor visitor) {
 		if (visitor == null) {
 			return;
 		}
@@ -776,6 +788,11 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private void collectUnusedImportDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, ASTNodeVisitor visitor,
 			URI uri, List<ASTNode> nodes) {
 		Set<String> referencedNames = collectReferencedNames(nodes);
+		boolean hasImportNodes = nodes.stream().anyMatch(ImportNode.class::isInstance);
+		if (!hasImportNodes) {
+			collectUnusedImportDiagnosticsFromSource(diagnosticsByFile, uri, referencedNames);
+			return;
+		}
 		for (ASTNode node : nodes) {
 			if (!(node instanceof ImportNode)) {
 				continue;
@@ -793,6 +810,41 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				addWarningDiagnostic(diagnosticsByFile, uri, range, "Unused import: " + importName);
 			}
 		}
+	}
+
+	private void collectUnusedImportDiagnosticsFromSource(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri,
+			Set<String> referencedNames) {
+		String source = fileContentsTracker.getContents(uri);
+		if (source == null || source.isBlank()) {
+			return;
+		}
+		String[] lines = source.split("\\r?\\n", -1);
+		for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+			String line = lines[lineIndex];
+			Matcher matcher = PATTERN_IMPORT_STATEMENT.matcher(line);
+			if (!matcher.matches()) {
+				continue;
+			}
+			String importPath = matcher.group(1);
+			if (importPath == null || importPath.isBlank() || importPath.endsWith(".*")) {
+				continue;
+			}
+			String alias = matcher.group(2);
+			String importName = alias != null && !alias.isBlank() ? alias : getSimpleImportName(importPath);
+			if (importName == null || importName.isBlank()) {
+				continue;
+			}
+			if (!referencedNames.contains(importName)) {
+				Range range = new Range(new Position(lineIndex, 0), new Position(lineIndex, line.length()));
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Unused import: " + importName);
+			}
+		}
+	}
+
+	private String getSimpleImportName(String importPath) {
+		int lastDot = importPath.lastIndexOf('.');
+		String name = lastDot >= 0 ? importPath.substring(lastDot + 1) : importPath;
+		return name != null && !name.isBlank() ? name : null;
 	}
 
 	private Set<String> collectReferencedNames(List<ASTNode> nodes) {
@@ -902,11 +954,39 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	private void collectUnnecessarySemicolonDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri,
 			List<ASTNode> nodes) {
+		boolean foundSemicolon = false;
 		for (ASTNode node : nodes) {
 			if (!(node instanceof EmptyStatement)) {
 				continue;
 			}
 			Range range = GroovyLanguageServerUtils.astNodeToRange(node);
+			addWarningDiagnostic(diagnosticsByFile, uri, range, "Unnecessary semicolon");
+			if (range != null) {
+				foundSemicolon = true;
+			}
+		}
+		if (!foundSemicolon) {
+			collectUnnecessarySemicolonDiagnosticsFromSource(diagnosticsByFile, uri);
+		}
+	}
+
+	private void collectUnnecessarySemicolonDiagnosticsFromSource(Map<URI, List<Diagnostic>> diagnosticsByFile,
+			URI uri) {
+		String source = fileContentsTracker.getContents(uri);
+		if (source == null || source.isBlank()) {
+			return;
+		}
+		String[] lines = source.split("\\r?\\n", -1);
+		for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+			String line = lines[lineIndex];
+			if (!PATTERN_UNNECESSARY_SEMICOLON.matcher(line).matches()) {
+				continue;
+			}
+			int col = line.indexOf(';');
+			if (col < 0) {
+				continue;
+			}
+			Range range = new Range(new Position(lineIndex, col), new Position(lineIndex, col + 1));
 			addWarningDiagnostic(diagnosticsByFile, uri, range, "Unnecessary semicolon");
 		}
 	}
