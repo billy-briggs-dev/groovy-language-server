@@ -208,6 +208,58 @@ class GroovyServicesCompletionTests {
 	}
 
 	@Test
+	void testGrailsGormCompletions() throws Exception {
+		Path grailsApp = workspaceRoot.resolve("grails-app");
+		Path confDir = grailsApp.resolve("conf");
+		Files.createDirectories(confDir);
+		Files.writeString(confDir.resolve("application.yml"), "grails:\n  profile: web\n");
+
+		Path domainDir = grailsApp.resolve("domain").resolve("demo");
+		Files.createDirectories(domainDir);
+		Path domainFile = domainDir.resolve("Book.groovy");
+		String domainSource = String.join("\n",
+				"package demo",
+				"class Book {",
+				"  String title",
+				"}");
+		Files.writeString(domainFile, domainSource);
+
+		Path servicesDir = grailsApp.resolve("services").resolve("demo");
+		Files.createDirectories(servicesDir);
+		Path serviceFile = servicesDir.resolve("BookService.groovy");
+		String serviceSource = String.join("\n",
+				"package demo",
+				"class BookService {",
+				"  void run() {",
+				"    Book.",
+				"    Book book = new Book()",
+				"    book.",
+				"  }",
+				"}");
+		Files.writeString(serviceFile, serviceSource);
+
+		services.setWorkspaceRoot(workspaceRoot);
+		String uri = serviceFile.toUri().toString();
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, serviceSource);
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position staticPosition = new Position(3, 9);
+		Either<List<CompletionItem>, CompletionList> staticResult = services
+				.completion(new CompletionParams(textDocument, staticPosition)).get();
+		Assertions.assertTrue(staticResult.isLeft());
+		List<CompletionItem> staticItems = staticResult.getLeft();
+		Assertions.assertTrue(staticItems.stream().anyMatch(item -> item.getLabel().equals("findByTitle")));
+
+		Position instancePosition = new Position(5, 9);
+		Either<List<CompletionItem>, CompletionList> instanceResult = services
+				.completion(new CompletionParams(textDocument, instancePosition)).get();
+		Assertions.assertTrue(instanceResult.isLeft());
+		List<CompletionItem> instanceItems = instanceResult.getLeft();
+		Assertions.assertTrue(instanceItems.stream().anyMatch(item -> item.getLabel().equals("save")));
+	}
+
+	@Test
 	void testMemberAccessOnClassAfterDot() throws Exception {
 		Path filePath = srcRoot.resolve("Completion.groovy");
 		String uri = filePath.toUri().toString();

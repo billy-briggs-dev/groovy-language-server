@@ -30,6 +30,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.Date;
 import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -161,6 +164,14 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 	private static final List<String> CANONICAL_ANNOTATIONS = List.of("Canonical", "groovy.transform.Canonical");
 	private static final List<String> IMMUTABLE_ANNOTATIONS = List.of("Immutable", "groovy.transform.Immutable");
 	private static final List<String> BUILDER_ANNOTATIONS = List.of("Builder", "groovy.transform.builder.Builder");
+	private static final List<String> GRAILS_ENTITY_ANNOTATIONS = List.of("Entity", "grails.persistence.Entity",
+			"grails.gorm.annotation.Entity");
+	private static final String GRAILS_DOMAIN_PATH = "grails-app" + java.io.File.separator + "domain";
+	private static final List<String> GORM_INSTANCE_METHODS = List.of("save", "delete", "refresh", "merge", "attach",
+			"discard", "lock", "validate");
+	private static final List<String> GORM_STATIC_METHODS = List.of("get", "read", "load", "find", "findWhere",
+			"findAllWhere", "list", "count", "exists", "where", "createCriteria", "withSession", "executeQuery",
+			"executeUpdate");
 
 	private void pushASTNode(ASTNode node) {
 		boolean isSynthetic = false;
@@ -486,6 +497,7 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		try {
 			applyPendingCategoryMethods(node);
 			applyAstTransformations(node);
+			applyGrailsTransformations(node, uri);
 			ClassNode unresolvedSuperClass = node.getUnresolvedSuperClass();
 			if (unresolvedSuperClass != null && unresolvedSuperClass.getLineNumber() != -1) {
 				pushASTNode(unresolvedSuperClass);
@@ -511,6 +523,172 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		applyCanonicalTransformations(node);
 		applyImmutableTransformations(node);
 		applyBuilderTransformations(node);
+	}
+
+	private void applyGrailsTransformations(ClassNode node, URI uri) {
+		if (!isGrailsDomainClass(node, uri)) {
+			return;
+		}
+		addGormDomainProperties(node);
+		addGormInstanceMethods(node);
+		addGormStaticMethods(node);
+		addDynamicFinderMethods(node);
+		addCollectionAssociationHelpers(node);
+	}
+
+	private boolean isGrailsDomainClass(ClassNode node, URI uri) {
+		if (node == null) {
+			return false;
+		}
+		if (hasAnyAnnotation(node, GRAILS_ENTITY_ANNOTATIONS)) {
+			return true;
+		}
+		ClassNode gormEntity = findClassNodeByName("grails.gorm.GormEntity");
+		if (gormEntity != null && node.implementsInterface(gormEntity)) {
+			return true;
+		}
+		if (uri == null) {
+			return false;
+		}
+		String path = uri.getPath();
+		if (path == null) {
+			return false;
+		}
+		String normalized = path.replace('/', java.io.File.separatorChar);
+		return normalized.contains(java.io.File.separator + GRAILS_DOMAIN_PATH + java.io.File.separator);
+	}
+
+	private void addGormDomainProperties(ClassNode node) {
+		registerMetaProperty(node, "id", ClassHelper.Long_TYPE);
+		registerMetaProperty(node, "version", ClassHelper.Long_TYPE);
+		registerMetaProperty(node, "dateCreated", ClassHelper.make(Date.class));
+		registerMetaProperty(node, "lastUpdated", ClassHelper.make(Date.class));
+	}
+
+	private void addGormInstanceMethods(ClassNode node) {
+		for (String method : GORM_INSTANCE_METHODS) {
+			ClassNode returnType = method.equals("validate") ? ClassHelper.boolean_TYPE : node;
+			addMetaMethod(node, method, false, returnType, new Parameter[0]);
+		}
+	}
+
+	private void addGormStaticMethods(ClassNode node) {
+		for (String method : GORM_STATIC_METHODS) {
+			ClassNode returnType = ClassHelper.dynamicType();
+			if (method.equals("count")) {
+				returnType = ClassHelper.Long_TYPE;
+			} else if (method.equals("exists")) {
+				returnType = ClassHelper.boolean_TYPE;
+			} else if (method.equals("list") || method.equals("findAllWhere") || method.equals("executeQuery")) {
+				returnType = ClassHelper.LIST_TYPE;
+			} else if (method.equals("get") || method.equals("read") || method.equals("load") || method.equals("find")
+					|| method.equals("findWhere")) {
+				returnType = node;
+			}
+			Parameter[] params = method.equals("get") || method.equals("read") || method.equals("load")
+					? new Parameter[] { new Parameter(ClassHelper.make(Object.class), "id") }
+					: new Parameter[0];
+			addMetaMethod(node, method, true, returnType, params);
+		}
+	}
+
+	private void addDynamicFinderMethods(ClassNode node) {
+		Set<PropertyNode> props = new LinkedHashSet<>(node.getProperties());
+		for (FieldNode field : node.getFields()) {
+			if (Modifier.isStatic(field.getModifiers())) {
+				continue;
+			}
+			if (field.getName().startsWith("$") || "metaClass".equals(field.getName())) {
+				continue;
+			}
+			PropertyNode prop = node.getProperty(field.getName());
+			if (prop != null) {
+				props.add(prop);
+			}
+		}
+		for (PropertyNode prop : props) {
+			if (prop == null || prop.isStatic()) {
+				continue;
+			}
+			String name = prop.getName();
+			if (name == null || name.isBlank()) {
+				continue;
+			}
+			String suffix = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+			Parameter[] params = new Parameter[] { new Parameter(prop.getType(), name) };
+			addMetaMethod(node, "findBy" + suffix, true, node, params);
+			addMetaMethod(node, "findAllBy" + suffix, true, ClassHelper.LIST_TYPE, params);
+			addMetaMethod(node, "countBy" + suffix, true, ClassHelper.Long_TYPE, params);
+			addMetaMethod(node, "existsBy" + suffix, true, ClassHelper.boolean_TYPE, params);
+		}
+	}
+
+	private void addCollectionAssociationHelpers(ClassNode node) {
+		for (PropertyNode prop : node.getProperties()) {
+			if (prop == null || prop.isStatic()) {
+				continue;
+			}
+			ClassNode type = prop.getType();
+			if (type == null) {
+				continue;
+			}
+			boolean isCollection = ClassHelper.COLLECTION_TYPE.equals(type)
+					|| type.implementsInterface(ClassHelper.COLLECTION_TYPE)
+					|| type.isDerivedFrom(ClassHelper.COLLECTION_TYPE)
+					|| ClassHelper.MAP_TYPE.equals(type)
+					|| type.implementsInterface(ClassHelper.MAP_TYPE)
+					|| type.isDerivedFrom(ClassHelper.MAP_TYPE);
+			if (!isCollection) {
+				continue;
+			}
+			String name = prop.getName();
+			if (name == null || name.isBlank()) {
+				continue;
+			}
+			String suffix = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+			Parameter[] params = new Parameter[] { new Parameter(ClassHelper.dynamicType(), name) };
+			addMetaMethod(node, "addTo" + suffix, false, node, params);
+			addMetaMethod(node, "removeFrom" + suffix, false, node, params);
+		}
+	}
+
+	private void addMetaMethod(ClassNode targetType, String methodName, boolean isStatic, ClassNode returnType,
+			Parameter[] params) {
+		if (targetType == null || methodName == null) {
+			return;
+		}
+		if (!targetType.getMethods(methodName).isEmpty()) {
+			return;
+		}
+		int modifiers = Modifier.PUBLIC | (isStatic ? Modifier.STATIC : 0);
+		MethodNode methodNode = new MethodNode(methodName, modifiers,
+				returnType == null ? ClassHelper.dynamicType() : returnType,
+				params == null ? new Parameter[0] : params, new ClassNode[0], null);
+		methodNode.setDeclaringClass(targetType);
+		targetType.addMethod(methodNode);
+		metaClassMethodsByType.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(methodName,
+				methodNode);
+		String simpleName = targetType.getNameWithoutPackage();
+		if (simpleName != null && !simpleName.equals(targetType.getName())) {
+			metaClassMethodsByType.computeIfAbsent(simpleName, key -> new HashMap<>()).put(methodName, methodNode);
+		}
+	}
+
+	private void registerMetaProperty(ClassNode targetType, String propertyName, ClassNode type) {
+		if (targetType == null || propertyName == null || propertyName.isBlank()) {
+			return;
+		}
+		if (targetType.getProperty(propertyName) != null) {
+			return;
+		}
+		PropertyNode prop = new PropertyNode(propertyName, Modifier.PUBLIC,
+				type == null ? ClassHelper.dynamicType() : type, targetType, null, null, null);
+		prop.setDeclaringClass(targetType);
+		metaClassPropertiesByType.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(propertyName, prop);
+		String simpleName = targetType.getNameWithoutPackage();
+		if (simpleName != null && !simpleName.equals(targetType.getName())) {
+			metaClassPropertiesByType.computeIfAbsent(simpleName, key -> new HashMap<>()).put(propertyName, prop);
+		}
 	}
 
 	private void applyDelegateTransformations(ClassNode node) {

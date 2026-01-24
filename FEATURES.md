@@ -45,9 +45,9 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   
 - [ ] **Grails support** (#41)
   - [x] Grails project detection
-  - [ ] Domain class intelligence
-  - [ ] GORM support
-  - [ ] GSP template support
+  - [x] Domain class intelligence (Grails 7.0.0+)
+  - [x] GORM support (Grails 7.0.0+)
+  - [x] GSP template support (Grails 7.0.0+)
   - [x] Avoid duplicate class definitions from build output
 
 ### 3. **Semantic Analysis**

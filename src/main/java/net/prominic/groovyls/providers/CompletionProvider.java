@@ -172,8 +172,13 @@ public class CompletionProvider {
 				}
 				if (inferredType != null) {
 					populateItemsFromType(inferredType, prefix, items);
-				} else if (varExpr != null) {
-					populateItemsFromExpression(varExpr, prefix, items);
+				} else {
+					ClassNode classByName = findClassNodeByName(leftName);
+					if (classByName != null) {
+						populateItemsFromExpression(new ClassExpression(classByName), prefix, items);
+					} else if (varExpr != null) {
+						populateItemsFromExpression(varExpr, prefix, items);
+					}
 				}
 			}
 		}
@@ -1125,6 +1130,18 @@ public class CompletionProvider {
 			return bestType;
 		}
 		return resolveTypeFromSourceText(uri, name, position);
+	}
+
+	private ClassNode findClassNodeByName(String name) {
+		if (name == null || ast == null) {
+			return null;
+		}
+		for (ClassNode classNode : ast.getClassNodes()) {
+			if (name.equals(classNode.getName()) || name.equals(classNode.getNameWithoutPackage())) {
+				return classNode;
+			}
+		}
+		return null;
 	}
 
 	private ClassNode resolveTypeFromSourceText(URI uri, String name, Position position) {

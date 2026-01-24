@@ -143,6 +143,7 @@ import net.prominic.groovyls.providers.CompletionProvider;
 import net.prominic.groovyls.providers.CallHierarchyProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
+import net.prominic.groovyls.providers.GspTemplateSymbolProvider;
 import net.prominic.groovyls.providers.ImplementationProvider;
 import net.prominic.groovyls.providers.FormattingProvider;
 import net.prominic.groovyls.providers.FormattingSettings;
@@ -239,6 +240,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	public void setWorkspaceRoot(Path workspaceRoot) {
 		this.workspaceRoot = workspaceRoot;
+		compilationUnitFactory.invalidateCompilationUnit();
 		createOrUpdateCompilationUnit();
 		detectGradleProject();
 		detectGrailsProject();
@@ -269,6 +271,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	public void didClose(DidCloseTextDocumentParams params) {
 		fileContentsTracker.didClose(params);
 		URI uri = URI.create(params.getTextDocument().getUri());
+		if (languageClient != null) {
+			languageClient.publishDiagnostics(new PublishDiagnosticsParams(uri.toString(), new ArrayList<>()));
+		}
 		scheduleCompileAndVisitAST(uri);
 	}
 
@@ -393,6 +398,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		grailsProjectInfo = GrailsProjectDetector.detect(workspaceRoot);
 		if ((sourceRoots == null || sourceRoots.isEmpty()) && grailsProjectInfo != null) {
 			compilationUnitFactory.setSourceRoots(getDetectedSourceRoots());
+			compilationUnitFactory.invalidateCompilationUnit();
 			synchronized (compileOperationLock) {
 				boolean isSameUnit = createOrUpdateCompilationUnit();
 				compile();
@@ -699,7 +705,13 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			WorkspaceSymbolParams params) {
 		ensureAstAvailable();
 		WorkspaceSymbolProvider provider = new WorkspaceSymbolProvider(astVisitor);
-		return provider.provideWorkspaceSymbols(params.getQuery()).thenApply(Either::forRight);
+		List<WorkspaceSymbol> results = new ArrayList<>(
+				provider.provideWorkspaceSymbols(params.getQuery()).join());
+		if (grailsProjectInfo != null && workspaceRoot != null) {
+			GspTemplateSymbolProvider gspProvider = new GspTemplateSymbolProvider(workspaceRoot, grailsProjectInfo);
+			results.addAll(gspProvider.provideWorkspaceSymbols(params.getQuery()));
+		}
+		return CompletableFuture.completedFuture(Either.forRight(results));
 	}
 
 	@Override
@@ -1010,7 +1022,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			if (shouldCompile) {
 				compile();
 			}
-			if (isSameUnit && contextURIs != null && !contextURIs.isEmpty()) {
+			if (grailsProjectInfo != null) {
+				visitAST();
+			} else if (isSameUnit && contextURIs != null && !contextURIs.isEmpty()) {
 				visitAST(contextURIs);
 			} else {
 				visitAST();
@@ -1064,8 +1078,38 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			e.printStackTrace(System.err);
 		}
 		DiagnosticsResult diagnostics = handleErrorCollector(compilationUnit.getErrorCollector());
-		diagnostics.diagnostics.stream().forEach(languageClient::publishDiagnostics);
+		if (languageClient != null) {
+			diagnostics.diagnostics.stream()
+					.filter(params -> isOpenDocumentUri(URI.create(params.getUri())))
+					.forEach(languageClient::publishDiagnostics);
+		}
 		removeFatalErrorSources(diagnostics.fatalErrorUris);
+	}
+
+	private boolean isOpenDocumentUri(URI uri) {
+		if (uri == null) {
+			return false;
+		}
+		if (fileContentsTracker.isOpen(uri)) {
+			return true;
+		}
+		if (!"file".equalsIgnoreCase(uri.getScheme())) {
+			return false;
+		}
+		try {
+			Path diagnosticPath = Paths.get(uri).normalize();
+			for (URI openUri : fileContentsTracker.getOpenURIs()) {
+				if (!"file".equalsIgnoreCase(openUri.getScheme())) {
+					continue;
+				}
+				if (diagnosticPath.equals(Paths.get(openUri).normalize())) {
+					return true;
+				}
+			}
+		} catch (Exception e) {
+			return false;
+		}
+		return false;
 	}
 
 	private DiagnosticsResult handleErrorCollector(ErrorCollector collector) {
@@ -1111,8 +1155,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 					});
 		}
 
-		ASTNodeVisitor diagnosticsVisitor = astVisitor;
-		if (diagnosticsVisitor == null && compilationUnit != null) {
+		ASTNodeVisitor diagnosticsVisitor = null;
+		if (compilationUnit != null) {
 			diagnosticsVisitor = new ASTNodeVisitor();
 			diagnosticsVisitor.visitCompilationUnit(compilationUnit);
 		}

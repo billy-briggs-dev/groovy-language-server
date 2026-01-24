@@ -132,7 +132,21 @@ public class GroovyASTUtils {
             return tryToResolveOriginalClassNode(classExpression.getType(), strict, astVisitor);
         } else if (node instanceof ImportNode) {
             ImportNode importNode = (ImportNode) node;
-            return tryToResolveOriginalClassNode(importNode.getType(), strict, astVisitor);
+            ClassNode importType = importNode.getType();
+            if (importType == null) {
+                String className = importNode.getClassName();
+                ClassNode byName = findClassNodeByName(className, astVisitor);
+                if (byName == null && className != null) {
+                    int lastDot = className.lastIndexOf('.');
+                    if (lastDot >= 0) {
+                        byName = findClassNodeByName(className.substring(lastDot + 1), astVisitor);
+                    }
+                }
+                if (byName != null) {
+                    return byName;
+                }
+            }
+            return tryToResolveOriginalClassNode(importType, strict, astVisitor);
         } else if (node instanceof MethodNode) {
             return node;
         } else if (node instanceof ConstantExpression && parentNode != null) {
@@ -293,19 +307,27 @@ public class GroovyASTUtils {
     public static List<PropertyNode> getPropertiesForLeftSideOfPropertyExpression(Expression node,
             ASTNodeVisitor astVisitor) {
         ClassNode classNode = getTypeOfNode(node, astVisitor);
+        boolean statics = node instanceof ClassExpression;
+        if ((classNode == null || ClassHelper.isDynamicTyped(classNode) || classNode == ClassHelper.OBJECT_TYPE)
+                && node instanceof VariableExpression && astVisitor != null) {
+            ClassNode byName = findClassNodeByName(((VariableExpression) node).getName(), astVisitor);
+            if (byName != null) {
+                classNode = byName;
+                statics = true;
+            }
+        }
         if (classNode != null) {
             List<ClassNode> classNodes = new ArrayList<>();
             classNodes.add(classNode);
 
-            boolean statics = node instanceof ClassExpression;
-
+            final boolean isStaticAccess = statics;
             List<PropertyNode> result = new ArrayList<>();
             int i = 0;
             while (i < classNodes.size()) {
                 ClassNode current = classNodes.get(i);
 
                 result.addAll(current.getProperties().stream().filter(propNode -> {
-                    return statics ? propNode.isStatic() : !propNode.isStatic();
+                    return isStaticAccess ? propNode.isStatic() : !propNode.isStatic();
                 }).collect(Collectors.toList()));
 
                 if (current.isInterface()) {
@@ -332,19 +354,27 @@ public class GroovyASTUtils {
     public static List<MethodNode> getMethodsForLeftSideOfPropertyExpression(Expression node,
             ASTNodeVisitor astVisitor) {
         ClassNode classNode = getTypeOfNode(node, astVisitor);
+        boolean statics = node instanceof ClassExpression;
+        if ((classNode == null || ClassHelper.isDynamicTyped(classNode) || classNode == ClassHelper.OBJECT_TYPE)
+                && node instanceof VariableExpression && astVisitor != null) {
+            ClassNode byName = findClassNodeByName(((VariableExpression) node).getName(), astVisitor);
+            if (byName != null) {
+                classNode = byName;
+                statics = true;
+            }
+        }
         if (classNode != null) {
             List<ClassNode> classNodes = new ArrayList<>();
             classNodes.add(classNode);
 
-            boolean statics = node instanceof ClassExpression;
-
+            final boolean isStaticAccess = statics;
             List<MethodNode> result = new ArrayList<>();
             int i = 0;
             while (i < classNodes.size()) {
                 ClassNode current = classNodes.get(i);
 
                 result.addAll(current.getMethods().stream().filter(methodNode -> {
-                    return statics ? methodNode.isStatic() : !methodNode.isStatic();
+                    return isStaticAccess ? methodNode.isStatic() : !methodNode.isStatic();
                 }).collect(Collectors.toList()));
 
                 result.addAll(astVisitor.getMetaClassMethods(current));
