@@ -28,7 +28,7 @@ import groovy.lang.groovydoc.Groovydoc;
 
 public class GroovydocUtils {
 	private static final Pattern INLINE_TAG_PATTERN = Pattern
-			.compile("\\{@(link|linkplain|code|literal)\\s+([^}]+)\\}");
+			.compile("\\{@(link|linkplain|code|literal)\\s+([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}");
 	private static final Pattern HTML_LINK_PATTERN = Pattern.compile("<a\\s+href=(\"|')(.*?)\\1\\s*>(.*?)</a>",
 			Pattern.CASE_INSENSITIVE);
 	private static final Pattern LINK_PARTS_PATTERN = Pattern.compile("([^\\s]+)(?:\\s+(.+))?");
@@ -116,8 +116,10 @@ public class GroovydocUtils {
 
 	private static String replaceInlineTags(String line) {
 		Matcher matcher = INLINE_TAG_PATTERN.matcher(line);
-		StringBuffer buffer = new StringBuffer();
+		StringBuilder builder = new StringBuilder();
+		int last = 0;
 		while (matcher.find()) {
+			builder.append(line, last, matcher.start());
 			String tag = matcher.group(1);
 			String body = matcher.group(2).trim();
 			String replacement = body;
@@ -128,23 +130,26 @@ public class GroovydocUtils {
 			} else {
 				replacement = formatLink(body);
 			}
-			matcher.appendReplacement(buffer, Matcher.quoteReplacement(replacement));
+			builder.append(replacement);
+			last = matcher.end();
 		}
-		matcher.appendTail(buffer);
-		return buffer.toString();
+		builder.append(line.substring(last));
+		return builder.toString();
 	}
 
 	private static String replaceHtmlLinks(String line) {
 		Matcher matcher = HTML_LINK_PATTERN.matcher(line);
-		StringBuffer buffer = new StringBuffer();
+		StringBuilder builder = new StringBuilder();
+		int last = 0;
 		while (matcher.find()) {
+			builder.append(line, last, matcher.start());
 			String url = matcher.group(2);
 			String label = matcher.group(3);
-			String replacement = "[" + label + "](" + url + ")";
-			matcher.appendReplacement(buffer, Matcher.quoteReplacement(replacement));
+			builder.append("[").append(label).append("](").append(url).append(")");
+			last = matcher.end();
 		}
-		matcher.appendTail(buffer);
-		return buffer.toString();
+		builder.append(line.substring(last));
+		return builder.toString();
 	}
 
 	private static String formatSeeAlsoEntry(String entry) {
