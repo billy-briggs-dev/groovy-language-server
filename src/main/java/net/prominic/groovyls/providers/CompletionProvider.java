@@ -466,26 +466,26 @@ public class CompletionProvider {
 		populateItemsFromMethods(methods, memberNamePrefix, existingNames, items);
 
 		ClassNode leftType = GroovyASTUtils.getTypeOfNode(leftSide, ast);
-		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE) {
+		if (leftType == null || ClassHelper.isDynamicTyped(leftType) || leftType == ClassHelper.OBJECT_TYPE) {
 			ClassNode fallback = leftSide.getType();
-			if (fallback != null && fallback != ClassHelper.DYNAMIC_TYPE) {
+			if (fallback != null && !ClassHelper.isDynamicTyped(fallback)) {
 				leftType = fallback;
 			}
 		}
-		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE) {
+		if (leftType == null || ClassHelper.isDynamicTyped(leftType) || leftType == ClassHelper.OBJECT_TYPE) {
 			ASTNode def = GroovyASTUtils.getDefinition(leftSide, false, ast);
 			if (def instanceof org.codehaus.groovy.ast.Variable) {
 				org.codehaus.groovy.ast.Variable variable = (org.codehaus.groovy.ast.Variable) def;
 				ClassNode origin = variable.getOriginType();
-				if (origin != null && origin != ClassHelper.DYNAMIC_TYPE) {
+				if (origin != null && !ClassHelper.isDynamicTyped(origin)) {
 					leftType = origin;
 				} else {
 					ClassNode varType = variable.getType();
-					if (varType != null && varType != ClassHelper.DYNAMIC_TYPE) {
+					if (varType != null && !ClassHelper.isDynamicTyped(varType)) {
 						leftType = varType;
 					}
 				}
-				if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+				if ((leftType == null || ClassHelper.isDynamicTyped(leftType)
 						|| leftType == ClassHelper.OBJECT_TYPE) && def instanceof VariableExpression) {
 					VariableExpression varExpr = (VariableExpression) def;
 					if (varExpr.hasInitialExpression()) {
@@ -493,7 +493,7 @@ public class CompletionProvider {
 					}
 				}
 			}
-			if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE)
+			if ((leftType == null || ClassHelper.isDynamicTyped(leftType) || leftType == ClassHelper.OBJECT_TYPE)
 					&& leftSide instanceof VariableExpression) {
 				String varName = ((VariableExpression) leftSide).getName();
 				for (ASTNode candidate : ast.getNodes()) {
@@ -508,7 +508,7 @@ public class CompletionProvider {
 				}
 			}
 		}
-		if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE)
+		if ((leftType == null || ClassHelper.isDynamicTyped(leftType) || leftType == ClassHelper.OBJECT_TYPE)
 				&& leftSide instanceof VariableExpression) {
 			Position inferredPosition = completionPosition;
 			if (inferredPosition == null && leftSide.getLineNumber() > 0 && leftSide.getColumnNumber() > 0) {
@@ -546,7 +546,7 @@ public class CompletionProvider {
 		if (text == null || text.isBlank()) {
 			return;
 		}
-		boolean matchAllTypes = leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+		boolean matchAllTypes = leftType == null || ClassHelper.isDynamicTyped(leftType)
 				|| leftType == ClassHelper.OBJECT_TYPE
 				|| "groovy.lang.GroovyObject".equals(leftType.getName());
 		String targetName = matchAllTypes ? null : leftType.getName();
@@ -575,7 +575,7 @@ public class CompletionProvider {
 
 	private void populateItemsFromMetaClassAssignments(ClassNode leftType, String memberNamePrefix,
 			Set<String> existingNames, List<CompletionItem> items) {
-		boolean matchAllTypes = leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+		boolean matchAllTypes = leftType == null || ClassHelper.isDynamicTyped(leftType)
 				|| leftType == ClassHelper.OBJECT_TYPE
 				|| "groovy.lang.GroovyObject".equals(leftType.getName());
 		String targetName = matchAllTypes ? null : leftType.getName();

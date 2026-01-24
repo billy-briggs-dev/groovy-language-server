@@ -118,14 +118,9 @@ public class GroovyDebugAdapter implements IDebugProtocolServer {
         breakpoints.clear();
         Source source = args.getSource();
         SourceBreakpoint[] requested = args.getBreakpoints();
-        int[] lines = args.getLines();
         if (requested != null) {
             for (SourceBreakpoint requestedBreakpoint : requested) {
                 breakpoints.add(createBreakpoint(source, requestedBreakpoint.getLine()));
-            }
-        } else if (lines != null) {
-            for (int line : lines) {
-                breakpoints.add(createBreakpoint(source, line));
             }
         }
         SetBreakpointsResponse response = new SetBreakpointsResponse();
