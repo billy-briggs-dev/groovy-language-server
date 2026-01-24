@@ -153,7 +153,7 @@ public final class MavenProjectDetector {
         List<String> dependencies = parseDependencies(project, properties, managedVersions);
 
         return new PomModel(groupId, artifactId, version, packaging, properties, modules, repositories, dependencies,
-            managedVersions);
+                managedVersions);
     }
 
     private static Document loadDocument(Path pomPath) {
@@ -383,7 +383,8 @@ public final class MavenProjectDetector {
             this.modules = modules == null ? Collections.emptyList() : new ArrayList<>(modules);
             this.repositories = repositories == null ? Collections.emptyList() : new ArrayList<>(repositories);
             this.dependencies = dependencies == null ? Collections.emptyList() : new ArrayList<>(dependencies);
-            this.managedVersions = managedVersions == null ? Collections.emptyMap() : new LinkedHashMap<>(managedVersions);
+            this.managedVersions = managedVersions == null ? Collections.emptyMap()
+                    : new LinkedHashMap<>(managedVersions);
         }
     }
 }
