@@ -260,6 +260,96 @@ class GroovyServicesCompletionTests {
 	}
 
 	@Test
+	void testGradleDependenciesDslCompletion() throws Exception {
+		Path filePath = srcRoot.resolve("build.gradle");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class DependencyHandler {\n");
+		contents.append("  void implementation(String dep) {}\n");
+		contents.append("  void testImplementation(String dep) {}\n");
+		contents.append("}\n");
+		contents.append("class GradleDsl {\n");
+		contents.append("  @groovy.lang.DslMarker\n");
+		contents.append("  static void dependencies(DependencyHandler handler, Closure block) {}\n");
+		contents.append("}\n");
+		contents.append("GradleDsl.dependencies(new DependencyHandler()) {\n");
+		contents.append("  imple\n");
+		contents.append("}\n");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(9, 7);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("implementation") && item.getKind().equals(CompletionItemKind.Method);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+	}
+
+	@Test
+	void testJenkinsDslCompletion() throws Exception {
+		Path filePath = srcRoot.resolve("Jenkinsfile");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class JenkinsSteps {\n");
+		contents.append("  void stage(String name, Closure block) {}\n");
+		contents.append("  void node(Closure block) {}\n");
+		contents.append("}\n");
+		contents.append("class Pipeline {\n");
+		contents.append("  @groovy.lang.DslMarker\n");
+		contents.append("  static void pipeline(JenkinsSteps steps, Closure block) {}\n");
+		contents.append("}\n");
+		contents.append("Pipeline.pipeline(new JenkinsSteps()) {\n");
+		contents.append("  st\n");
+		contents.append("}\n");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(9, 4);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("stage") && item.getKind().equals(CompletionItemKind.Method);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+	}
+
+	@Test
+	void testCustomDslMarkerCompletion() throws Exception {
+		Path filePath = srcRoot.resolve("CustomDsl.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("@groovy.lang.DslMarker\n");
+		contents.append("class QueryBuilder {\n");
+		contents.append("  void select(String fields) {}\n");
+		contents.append("  void where(String clause) {}\n");
+		contents.append("}\n");
+		contents.append("class QueryDsl {\n");
+		contents.append("  static void query(QueryBuilder builder, Closure block) {}\n");
+		contents.append("}\n");
+		contents.append("QueryDsl.query(new QueryBuilder()) {\n");
+		contents.append("  whe\n");
+		contents.append("}\n");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(9, 5);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("where") && item.getKind().equals(CompletionItemKind.Method);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+	}
+
+	@Test
 	void testMemberAccessOnLocalListIndexAfterDot() throws Exception {
 		Path filePath = srcRoot.resolve("Completion.groovy");
 		String uri = filePath.toUri().toString();
