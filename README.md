@@ -7,6 +7,7 @@ The following language server protocol requests are currently supported:
 - completion
 - definition
 - documentSymbol
+- formatting (document/range)
 - hover
 - references
 - rename
@@ -20,6 +21,12 @@ The following configuration options are supported:
 
 - groovy.java.home (`string` - sets a custom JDK path)
 - groovy.classpath (`string[]` - sets a custom classpath to include _.jar_ files)
+- groovy.formatting.formatOnSave (`boolean` - format on save)
+- groovy.formatting.indentSize (`number` - indentation size)
+- groovy.formatting.braceStyle (`sameLine` | `nextLine` - brace placement)
+- groovy.formatting.spaceAroundOperators (`boolean` - spacing around operators)
+- groovy.formatting.spaceAfterCommas (`boolean` - spacing after commas)
+- groovy.formatting.spaceInsideBraces (`boolean` - spacing inside braces)
 
 ## Build
 
