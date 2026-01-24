@@ -27,8 +27,9 @@ import java.util.regex.Pattern;
 import groovy.lang.groovydoc.Groovydoc;
 
 public class GroovydocUtils {
+	private static final String INLINE_TAG_BODY_PATTERN = "[^{}]*(?:\\{[^{}]*\\}[^{}]*)*";
 	private static final Pattern INLINE_TAG_PATTERN = Pattern
-			.compile("\\{@(link|linkplain|code|literal)\\s+([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}");
+			.compile("\\{@(link|linkplain|code|literal)\\s+(" + INLINE_TAG_BODY_PATTERN + ")\\}");
 	private static final Pattern HTML_LINK_PATTERN = Pattern.compile("<a\\s+href=(\"|')(.*?)\\1\\s*>(.*?)</a>",
 			Pattern.CASE_INSENSITIVE);
 	private static final Pattern LINK_PARTS_PATTERN = Pattern.compile("([^\\s]+)(?:\\s+(.+))?");
@@ -37,6 +38,9 @@ public class GroovydocUtils {
 	private static final String GROOVYDOC_BASE_URL = "https://docs.groovy-lang.org/latest/html/api/";
 	private static final String JAVA_DOC_BASE_URL = "https://docs.oracle.com/en/java/javase/"
 			+ Runtime.version().feature() + "/docs/api/";
+	private static final String[] JAVA_PACKAGE_PREFIXES = { "java.", "javax.", "jakarta." };
+	private static final String[] GROOVY_PACKAGE_PREFIXES = { "groovy.", "org.codehaus.groovy.",
+			"org.apache.groovy." };
 
 	public static String groovydocToMarkdownDescription(Groovydoc groovydoc) {
 		if (groovydoc == null || !groovydoc.isPresent()) {
@@ -96,12 +100,12 @@ public class GroovydocUtils {
 	private static String reformatLine(String line) {
 		line = replaceInlineTags(line);
 		line = replaceHtmlLinks(line);
+		line = line.replaceAll("(?i)<pre>\\s*<code>", "\n\n```\n");
+		line = line.replaceAll("(?i)</code>\\s*</pre>", "\n```\n");
+		line = line.replaceAll("(?i)<pre>", "\n\n```\n");
+		line = line.replaceAll("(?i)</pre>", "\n```\n");
 		// remove all attributes (including namespaced)
 		line = line.replaceAll("<(\\w+)(?:\\s+\\w+(?::\\w+)?=(\"|\')[^\"\']*\\2)*\\s*(\\/{0,1})>", "<$1$3>");
-		line = line.replaceAll("(?i)<pre>(?!\\s*<code>)", "\n\n```\n");
-		line = line.replaceAll("(?i)</code>\\s*</pre>", "\n```\n");
-		line = line.replaceAll("(?i)<pre>\\s*<code>", "\n\n```\n");
-		line = line.replaceAll("(?i)</pre>", "\n```\n");
 		line = line.replaceAll("</?(em|i)>", "_");
 		line = line.replaceAll("</?(strong|b)>", "**");
 		line = line.replaceAll("</?(tt|code)>", "`");
@@ -200,10 +204,9 @@ public class GroovydocUtils {
 			return null;
 		}
 		String baseUrl;
-		if (classRef.startsWith("java.") || classRef.startsWith("javax.") || classRef.startsWith("jakarta.")) {
+		if (startsWithAny(classRef, JAVA_PACKAGE_PREFIXES)) {
 			baseUrl = JAVA_DOC_BASE_URL;
-		} else if (classRef.startsWith("groovy.") || classRef.startsWith("org.codehaus.groovy.")
-				|| classRef.startsWith("org.apache.groovy.")) {
+		} else if (startsWithAny(classRef, GROOVY_PACKAGE_PREFIXES)) {
 			baseUrl = GROOVYDOC_BASE_URL;
 		} else {
 			return null;
@@ -220,5 +223,14 @@ public class GroovydocUtils {
 	private static String decodeHtmlEntities(String line) {
 		return line.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<")
 				.replace("&gt;", ">");
+	}
+
+	private static boolean startsWithAny(String value, String[] prefixes) {
+		for (String prefix : prefixes) {
+			if (value.startsWith(prefix)) {
+				return true;
+			}
+		}
+		return false;
 	}
 }
