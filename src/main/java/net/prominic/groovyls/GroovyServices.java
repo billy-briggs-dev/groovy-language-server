@@ -47,12 +47,29 @@ import com.google.gson.JsonObject;
 
 import org.codehaus.groovy.GroovyBugError;
 import org.codehaus.groovy.ast.ASTNode;
+import org.codehaus.groovy.ast.AnnotatedNode;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.DynamicVariable;
+import org.codehaus.groovy.ast.FieldNode;
+import org.codehaus.groovy.ast.ImportNode;
+import org.codehaus.groovy.ast.MethodNode;
+import org.codehaus.groovy.ast.ModuleNode;
+import org.codehaus.groovy.ast.Parameter;
+import org.codehaus.groovy.ast.PropertyNode;
 import org.codehaus.groovy.ast.Variable;
-import org.codehaus.groovy.ast.expr.VariableExpression;
-import org.codehaus.groovy.ast.expr.PropertyExpression;
+import org.codehaus.groovy.ast.expr.BinaryExpression;
+import org.codehaus.groovy.ast.expr.CastExpression;
+import org.codehaus.groovy.ast.expr.ClassExpression;
+import org.codehaus.groovy.ast.expr.ClosureExpression;
+import org.codehaus.groovy.ast.expr.ConstantExpression;
+import org.codehaus.groovy.ast.expr.ConstructorCallExpression;
 import org.codehaus.groovy.ast.expr.Expression;
+import org.codehaus.groovy.ast.expr.MethodCallExpression;
+import org.codehaus.groovy.ast.expr.PropertyExpression;
+import org.codehaus.groovy.ast.expr.StaticMethodCallExpression;
+import org.codehaus.groovy.ast.expr.VariableExpression;
+import org.codehaus.groovy.ast.stmt.BlockStatement;
+import org.codehaus.groovy.ast.stmt.EmptyStatement;
 import org.codehaus.groovy.control.CompilationFailedException;
 import org.codehaus.groovy.control.ErrorCollector;
 import org.codehaus.groovy.control.Phases;
@@ -134,7 +151,12 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	}
 
 	private static final Pattern PATTERN_CONSTRUCTOR_CALL = Pattern.compile(".*new \\w*$");
+	private static final Pattern PATTERN_IMPORT_STATEMENT = Pattern
+			.compile("^\\s*import\\s+(?:static\\s+)?([^\\s;]+)(?:\\s+as\\s+(\\w+))?\\s*;?\\s*$");
+	private static final Pattern PATTERN_UNNECESSARY_SEMICOLON = Pattern.compile("^\\s*;\\s*$");
 	private static final long DIAGNOSTIC_DEBOUNCE_MS = 250;
+	private static final int DUPLICATE_CODE_MIN_LENGTH = 10;
+	private static final int MAX_LINE_LENGTH = 120;
 
 	private LanguageClient languageClient;
 
@@ -272,9 +294,13 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			Matcher matcher = PATTERN_CONSTRUCTOR_CALL.matcher(lineBeforeOffset);
 			TextDocumentContentChangeEvent changeEvent = null;
 			if (matcher.matches()) {
-				changeEvent = new TextDocumentContentChangeEvent(new Range(position, position), 0, "a()");
+				changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(new Range(position, position));
+				changeEvent.setText("a()");
 			} else {
-				changeEvent = new TextDocumentContentChangeEvent(new Range(position, position), 0, "a");
+				changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(new Range(position, position));
+				changeEvent.setText("a");
 			}
 			DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 					Collections.singletonList(changeEvent));
@@ -297,8 +323,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			if (originalSource != null) {
 				VersionedTextDocumentIdentifier versionedTextDocument = new VersionedTextDocumentIdentifier(
 						textDocument.getUri(), 1);
-				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent(null, 0,
-						originalSource);
+				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(null);
+				changeEvent.setText(originalSource);
 				DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 						Collections.singletonList(changeEvent));
 				applyDidChangeAndCompileNow(didChangeParams);
@@ -332,8 +359,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			originalSource = fileContentsTracker.getContents(uri);
 			VersionedTextDocumentIdentifier versionedTextDocument = new VersionedTextDocumentIdentifier(
 					textDocument.getUri(), 1);
-			TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent(
-					new Range(position, position), 0, ")");
+			TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent();
+			changeEvent.setRange(new Range(position, position));
+			changeEvent.setText(")");
 			DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 					Collections.singletonList(changeEvent));
 			// if the offset node is null, there is probably a syntax error.
@@ -354,8 +382,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			if (originalSource != null) {
 				VersionedTextDocumentIdentifier versionedTextDocument = new VersionedTextDocumentIdentifier(
 						textDocument.getUri(), 1);
-				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent(null, 0,
-						originalSource);
+				TextDocumentContentChangeEvent changeEvent = new TextDocumentContentChangeEvent();
+				changeEvent.setRange(null);
+				changeEvent.setText(originalSource);
 				DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 						Collections.singletonList(changeEvent));
 				applyDidChangeAndCompileNow(didChangeParams);
@@ -397,7 +426,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			WorkspaceSymbolParams params) {
 		ensureAstAvailable();
 		WorkspaceSymbolProvider provider = new WorkspaceSymbolProvider(astVisitor);
-		return provider.provideWorkspaceSymbols(params.getQuery()).thenApply(Either::forLeft);
+		return provider.provideWorkspaceSymbols(params.getQuery()).thenApply(Either::forRight);
 	}
 
 	@Override
@@ -461,6 +490,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				try {
 					classGraphScanResult = new ClassGraph().overrideClassLoaders(classLoader).enableClassInfo()
 							.enableSystemJarsAndModules()
+							.setMaxBufferedJarRAMSize(Integer.MAX_VALUE)
 							.scan();
 				} catch (ClassGraphException e) {
 					classGraphScanResult = null;
@@ -645,6 +675,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			diagnosticsVisitor.visitCompilationUnit(compilationUnit);
 		}
 		collectUndefinedVariableDiagnostics(diagnosticsByFile, diagnosticsVisitor);
+		collectCodeInspectionDiagnostics(diagnosticsByFile, diagnosticsVisitor);
 
 		Set<PublishDiagnosticsParams> result = diagnosticsByFile.entrySet().stream()
 				.map(entry -> new PublishDiagnosticsParams(entry.getKey().toString(), entry.getValue()))
@@ -726,6 +757,375 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			diagnostic.setMessage("Undefined variable: " + name);
 			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
 		}
+	}
+
+	private void collectCodeInspectionDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile,
+			ASTNodeVisitor visitor) {
+		if (visitor == null) {
+			return;
+		}
+		Map<URI, List<ASTNode>> nodesByUri = new HashMap<>();
+		for (ASTNode node : visitor.getNodes()) {
+			URI uri = visitor.getURI(node);
+			if (uri == null) {
+				continue;
+			}
+			nodesByUri.computeIfAbsent(uri, key -> new ArrayList<>()).add(node);
+		}
+		for (Map.Entry<URI, List<ASTNode>> entry : nodesByUri.entrySet()) {
+			URI uri = entry.getKey();
+			List<ASTNode> nodes = entry.getValue();
+			collectUnusedImportDiagnostics(diagnosticsByFile, visitor, uri, nodes);
+			collectRedundantCastDiagnostics(diagnosticsByFile, uri, nodes);
+			collectUnnecessarySemicolonDiagnostics(diagnosticsByFile, uri, nodes);
+			collectEmptyBlockDiagnostics(diagnosticsByFile, visitor, uri, nodes);
+			collectDuplicateCodeDiagnostics(diagnosticsByFile, uri, nodes);
+			collectCodeStyleDiagnostics(diagnosticsByFile, uri);
+			collectBestPracticeDiagnostics(diagnosticsByFile, uri, nodes);
+		}
+	}
+
+	private void collectUnusedImportDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, ASTNodeVisitor visitor,
+			URI uri, List<ASTNode> nodes) {
+		Set<String> referencedNames = collectReferencedNames(nodes);
+		boolean hasImportNodes = nodes.stream().anyMatch(ImportNode.class::isInstance);
+		if (!hasImportNodes) {
+			collectUnusedImportDiagnosticsFromSource(diagnosticsByFile, uri, referencedNames);
+			return;
+		}
+		for (ASTNode node : nodes) {
+			if (!(node instanceof ImportNode)) {
+				continue;
+			}
+			ImportNode importNode = (ImportNode) node;
+			if (importNode.isStar()) {
+				continue;
+			}
+			String importName = getImportReferenceName(importNode);
+			if (importName == null || importName.isBlank()) {
+				continue;
+			}
+			if (!referencedNames.contains(importName)) {
+				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Unused import: " + importName);
+			}
+		}
+	}
+
+	private void collectUnusedImportDiagnosticsFromSource(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri,
+			Set<String> referencedNames) {
+		String source = fileContentsTracker.getContents(uri);
+		if (source == null || source.isBlank()) {
+			return;
+		}
+		String[] lines = source.split("\\r?\\n", -1);
+		for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+			String line = lines[lineIndex];
+			Matcher matcher = PATTERN_IMPORT_STATEMENT.matcher(line);
+			if (!matcher.matches()) {
+				continue;
+			}
+			String importPath = matcher.group(1);
+			if (importPath == null || importPath.isBlank() || importPath.endsWith(".*")) {
+				continue;
+			}
+			String alias = matcher.group(2);
+			String importName = alias != null && !alias.isBlank() ? alias : getSimpleImportName(importPath);
+			if (importName == null || importName.isBlank()) {
+				continue;
+			}
+			if (!referencedNames.contains(importName)) {
+				Range range = new Range(new Position(lineIndex, 0), new Position(lineIndex, line.length()));
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Unused import: " + importName);
+			}
+		}
+	}
+
+	private String getSimpleImportName(String importPath) {
+		int lastDot = importPath.lastIndexOf('.');
+		String name = lastDot >= 0 ? importPath.substring(lastDot + 1) : importPath;
+		return name != null && !name.isBlank() ? name : null;
+	}
+
+	private Set<String> collectReferencedNames(List<ASTNode> nodes) {
+		Set<String> referencedNames = new HashSet<>();
+		for (ASTNode node : nodes) {
+			if (node instanceof ClassExpression) {
+				addClassNodeReference(((ClassExpression) node).getType(), referencedNames);
+			} else if (node instanceof ConstructorCallExpression) {
+				addClassNodeReference(((ConstructorCallExpression) node).getType(), referencedNames);
+			} else if (node instanceof VariableExpression) {
+				String name = ((VariableExpression) node).getName();
+				if (name != null && !name.isBlank()) {
+					referencedNames.add(name);
+				}
+			} else if (node instanceof PropertyExpression) {
+				String name = ((PropertyExpression) node).getPropertyAsString();
+				if (name != null && !name.isBlank()) {
+					referencedNames.add(name);
+				}
+			} else if (node instanceof MethodCallExpression) {
+				String name = ((MethodCallExpression) node).getMethodAsString();
+				if (name != null && !name.isBlank()) {
+					referencedNames.add(name);
+				}
+			} else if (node instanceof StaticMethodCallExpression) {
+				StaticMethodCallExpression staticCall = (StaticMethodCallExpression) node;
+				String name = staticCall.getMethod();
+				if (name != null && !name.isBlank()) {
+					referencedNames.add(name);
+				}
+				addClassNodeReference(staticCall.getOwnerType(), referencedNames);
+			} else if (node instanceof FieldNode) {
+				addClassNodeReference(((FieldNode) node).getType(), referencedNames);
+			} else if (node instanceof PropertyNode) {
+				addClassNodeReference(((PropertyNode) node).getType(), referencedNames);
+			} else if (node instanceof MethodNode) {
+				addClassNodeReference(((MethodNode) node).getReturnType(), referencedNames);
+			} else if (node instanceof Parameter) {
+				addClassNodeReference(((Parameter) node).getType(), referencedNames);
+			} else if (node instanceof ClassNode) {
+				addClassNodeReference((ClassNode) node, referencedNames);
+			}
+		}
+		return referencedNames;
+	}
+
+	private void addClassNodeReference(ClassNode classNode, Set<String> referencedNames) {
+		if (classNode == null) {
+			return;
+		}
+		String name = classNode.getName();
+		if (name != null && !name.isBlank()) {
+			referencedNames.add(name);
+		}
+		String simpleName = classNode.getNameWithoutPackage();
+		if (simpleName != null && !simpleName.isBlank()) {
+			referencedNames.add(simpleName);
+		}
+	}
+
+	private String getImportReferenceName(ImportNode importNode) {
+		String alias = importNode.getAlias();
+		if (alias != null && !alias.isBlank()) {
+			return alias;
+		}
+		String fieldName = importNode.getFieldName();
+		if (fieldName != null && !fieldName.isBlank()) {
+			return fieldName;
+		}
+		ClassNode type = importNode.getType();
+		if (type != null) {
+			String simpleName = type.getNameWithoutPackage();
+			if (simpleName != null && !simpleName.isBlank()) {
+				return simpleName;
+			}
+			return type.getName();
+		}
+		String className = importNode.getClassName();
+		if (className != null && !className.isBlank()) {
+			int lastDot = className.lastIndexOf('.');
+			return lastDot >= 0 ? className.substring(lastDot + 1) : className;
+		}
+		return null;
+	}
+
+	private void collectRedundantCastDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri,
+			List<ASTNode> nodes) {
+		for (ASTNode node : nodes) {
+			if (!(node instanceof CastExpression)) {
+				continue;
+			}
+			CastExpression castExpression = (CastExpression) node;
+			ClassNode castType = castExpression.getType();
+			Expression expr = castExpression.getExpression();
+			ClassNode exprType = expr != null ? expr.getType() : null;
+			if (castType == null || exprType == null) {
+				continue;
+			}
+			ClassNode castRedirect = castType.redirect();
+			ClassNode exprRedirect = exprType.redirect();
+			if (castRedirect != null && castRedirect.equals(exprRedirect)) {
+				Range range = GroovyLanguageServerUtils.astNodeToRange(castExpression);
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Redundant cast");
+			}
+		}
+	}
+
+	private void collectUnnecessarySemicolonDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri,
+			List<ASTNode> nodes) {
+		boolean foundSemicolon = false;
+		for (ASTNode node : nodes) {
+			if (!(node instanceof EmptyStatement)) {
+				continue;
+			}
+			Range range = GroovyLanguageServerUtils.astNodeToRange(node);
+			addWarningDiagnostic(diagnosticsByFile, uri, range, "Unnecessary semicolon");
+			if (range != null) {
+				foundSemicolon = true;
+			}
+		}
+		if (!foundSemicolon) {
+			collectUnnecessarySemicolonDiagnosticsFromSource(diagnosticsByFile, uri);
+		}
+	}
+
+	private void collectUnnecessarySemicolonDiagnosticsFromSource(Map<URI, List<Diagnostic>> diagnosticsByFile,
+			URI uri) {
+		String source = fileContentsTracker.getContents(uri);
+		if (source == null || source.isBlank()) {
+			return;
+		}
+		String[] lines = source.split("\\r?\\n", -1);
+		for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+			String line = lines[lineIndex];
+			if (!PATTERN_UNNECESSARY_SEMICOLON.matcher(line).matches()) {
+				continue;
+			}
+			int col = line.indexOf(';');
+			if (col < 0) {
+				continue;
+			}
+			Range range = new Range(new Position(lineIndex, col), new Position(lineIndex, col + 1));
+			addWarningDiagnostic(diagnosticsByFile, uri, range, "Unnecessary semicolon");
+		}
+	}
+
+	private void collectEmptyBlockDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, ASTNodeVisitor visitor,
+			URI uri, List<ASTNode> nodes) {
+		for (ASTNode node : nodes) {
+			if (!(node instanceof BlockStatement)) {
+				continue;
+			}
+			BlockStatement block = (BlockStatement) node;
+			if (block.getStatements() != null && !block.getStatements().isEmpty()) {
+				continue;
+			}
+			ASTNode parent = visitor.getParent(block);
+			if (parent instanceof ModuleNode) {
+				continue;
+			}
+			Range range = GroovyLanguageServerUtils.astNodeToRange(block);
+			addWarningDiagnostic(diagnosticsByFile, uri, range, "Empty block");
+		}
+	}
+
+	private void collectDuplicateCodeDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri,
+			List<ASTNode> nodes) {
+		String source = fileContentsTracker.getContents(uri);
+		if (source == null || source.isBlank()) {
+			return;
+		}
+		Map<String, List<ASTNode>> blocksByText = new HashMap<>();
+		for (ASTNode node : nodes) {
+			if (!(node instanceof MethodNode) && !(node instanceof ClosureExpression)
+					&& !(node instanceof BlockStatement)) {
+				continue;
+			}
+			Range range = GroovyLanguageServerUtils.astNodeToRange(node);
+			String text = getSourceText(source, range);
+			if (text == null) {
+				continue;
+			}
+			String trimmed = text.trim();
+			if (trimmed.length() <= DUPLICATE_CODE_MIN_LENGTH) {
+				continue;
+			}
+			blocksByText.computeIfAbsent(trimmed, key -> new ArrayList<>()).add(node);
+		}
+		for (List<ASTNode> duplicates : blocksByText.values()) {
+			if (duplicates.size() < 2) {
+				continue;
+			}
+			for (ASTNode node : duplicates) {
+				Range range = GroovyLanguageServerUtils.astNodeToRange(node);
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Duplicate code detected");
+			}
+		}
+	}
+
+	private void collectCodeStyleDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri) {
+		String source = fileContentsTracker.getContents(uri);
+		if (source == null) {
+			return;
+		}
+		String[] lines = source.split("\n", -1);
+		for (int i = 0; i < lines.length; i++) {
+			String line = lines[i];
+			if (line.endsWith("\r")) {
+				line = line.substring(0, line.length() - 1);
+			}
+			int length = line.length();
+			if (length > MAX_LINE_LENGTH) {
+				Range range = new Range(new Position(i, MAX_LINE_LENGTH), new Position(i, length));
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Line exceeds 120 characters");
+			}
+			int trailingStart = length;
+			while (trailingStart > 0 && Character.isWhitespace(line.charAt(trailingStart - 1))) {
+				trailingStart--;
+			}
+			if (trailingStart < length) {
+				Range range = new Range(new Position(i, trailingStart), new Position(i, length));
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Trailing whitespace");
+			}
+		}
+	}
+
+	private void collectBestPracticeDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri,
+			List<ASTNode> nodes) {
+		for (ASTNode node : nodes) {
+			if (!(node instanceof BinaryExpression)) {
+				continue;
+			}
+			BinaryExpression binaryExpression = (BinaryExpression) node;
+			String operation = binaryExpression.getOperation() != null
+					? binaryExpression.getOperation().getText()
+					: null;
+			if (!"==".equals(operation)) {
+				continue;
+			}
+			if (isBooleanConstant(binaryExpression.getLeftExpression())
+					|| isBooleanConstant(binaryExpression.getRightExpression())) {
+				Range range = GroovyLanguageServerUtils.astNodeToRange(binaryExpression);
+				addWarningDiagnostic(diagnosticsByFile, uri, range, "Simplify boolean comparison");
+			}
+		}
+	}
+
+	private boolean isBooleanConstant(Expression expr) {
+		if (!(expr instanceof ConstantExpression)) {
+			return false;
+		}
+		Object value = ((ConstantExpression) expr).getValue();
+		return value instanceof Boolean;
+	}
+
+	private String getSourceText(String source, Range range) {
+		if (range == null) {
+			return null;
+		}
+		int startOffset = Positions.getOffset(source, range.getStart());
+		int endOffset = Positions.getOffset(source, range.getEnd());
+		if (startOffset < 0 || endOffset < 0 || endOffset < startOffset) {
+			return null;
+		}
+		int safeEnd = Math.min(source.length(), endOffset);
+		if (safeEnd <= startOffset) {
+			return null;
+		}
+		return source.substring(startOffset, safeEnd);
+	}
+
+	private void addWarningDiagnostic(Map<URI, List<Diagnostic>> diagnosticsByFile, URI uri, Range range,
+			String message) {
+		if (uri == null || range == null) {
+			return;
+		}
+		Diagnostic diagnostic = new Diagnostic();
+		diagnostic.setRange(range);
+		diagnostic.setSeverity(DiagnosticSeverity.Warning);
+		diagnostic.setMessage(message);
+		diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
 	}
 
 	private boolean isClassName(String name, ASTNodeVisitor visitor) {

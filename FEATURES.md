@@ -169,13 +169,13 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 ## 🟢 Medium Priority Features
 
 ### 11. **Code Inspection & Linting**
-- [ ] **Unused imports**
-- [ ] **Redundant casts**
-- [ ] **Unnecessary semicolons**
-- [ ] **Empty blocks**
-- [ ] **Duplicate code detection**
-- [ ] **Code style violations**
-- [ ] **Best practice suggestions**
+- [x] **Unused imports**
+- [x] **Redundant casts**
+- [x] **Unnecessary semicolons**
+- [x] **Empty blocks**
+- [x] **Duplicate code detection**
+- [x] **Code style violations**
+- [x] **Best practice suggestions**
 
 ### 12. **Testing Support**
 - [ ] **Spock framework support**

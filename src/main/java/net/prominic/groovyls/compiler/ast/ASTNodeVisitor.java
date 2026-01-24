@@ -424,7 +424,7 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 			if (targetType == null) {
 				targetType = new ClassNode(className, 0, ClassHelper.OBJECT_TYPE);
 			}
-			MethodNode methodNode = new MethodNode(methodName, 0, ClassHelper.DYNAMIC_TYPE, new Parameter[0],
+			MethodNode methodNode = new MethodNode(methodName, 0, ClassHelper.dynamicType(), new Parameter[0],
 					new ClassNode[0], null);
 			methodNode.setDeclaringClass(targetType);
 			if (targetType.getMethods(methodName).isEmpty()) {
@@ -1223,7 +1223,7 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		}
 		URI uri = sourceUnit != null ? sourceUnit.getSource().getURI() : null;
 		if (node.getRightExpression() instanceof ClosureExpression) {
-			MethodNode methodNode = new MethodNode(propertyName, 0, ClassHelper.DYNAMIC_TYPE, new Parameter[0],
+			MethodNode methodNode = new MethodNode(propertyName, 0, ClassHelper.dynamicType(), new Parameter[0],
 					new ClassNode[0], null);
 			methodNode.setDeclaringClass(targetType);
 			if (targetType.getMethods(propertyName).isEmpty()) {
@@ -1245,7 +1245,7 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 				}
 			}
 		} else {
-			PropertyNode propNode = new PropertyNode(propertyName, 0, ClassHelper.DYNAMIC_TYPE,
+			PropertyNode propNode = new PropertyNode(propertyName, 0, ClassHelper.dynamicType(),
 					targetType, null, null, null);
 			propNode.setDeclaringClass(targetType);
 			if (targetType.getProperty(propertyName) == null) {

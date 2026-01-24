@@ -14,6 +14,8 @@ The following language server protocol requests are currently supported:
 - symbol
 - typeDefinition
 
+The sample VS Code extension also registers a minimal Debug Adapter Protocol implementation for Groovy with basic breakpoint, variable, and expression evaluation support.
+
 The following configuration options are supported:
 
 - groovy.java.home (`string` - sets a custom JDK path)

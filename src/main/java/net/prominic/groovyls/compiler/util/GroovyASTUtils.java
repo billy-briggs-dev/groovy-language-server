@@ -203,7 +203,7 @@ public class GroovyASTUtils {
         } else if (definitionNode instanceof Variable) {
             Variable variable = (Variable) definitionNode;
             ClassNode variableType = variable.getOriginType();
-            if (variableType == null || variableType == ClassHelper.DYNAMIC_TYPE) {
+            if (variableType == null || ClassHelper.isDynamicTyped(variableType)) {
                 variableType = getTypeOfNode(definitionNode, astVisitor);
             }
             return tryToResolveOriginalClassNode(variableType, true, astVisitor);
@@ -377,19 +377,19 @@ public class GroovyASTUtils {
             String opText = binaryExpr.getOperation().getText();
             if (opText != null && opText.contains("[")) {
                 ClassNode leftType = leftExpr.getType();
-                boolean needsGenericResolution = leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+                boolean needsGenericResolution = leftType == null || ClassHelper.isDynamicTyped(leftType)
                         || leftType.getGenericsTypes() == null || leftType.getGenericsTypes().length == 0;
                 if (needsGenericResolution) {
                     ASTNode defNode = GroovyASTUtils.getDefinition(leftExpr, false, astVisitor);
                     if (defNode != null) {
                         ClassNode defType = getTypeOfNode(defNode, astVisitor);
-                        if (defType != null && (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+                        if (defType != null && (leftType == null || ClassHelper.isDynamicTyped(leftType)
                                 || defType.getGenericsTypes() != null && defType.getGenericsTypes().length > 0)) {
                             leftType = defType;
                         }
                     }
                 }
-                if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE)
+                if ((leftType == null || ClassHelper.isDynamicTyped(leftType))
                         && leftExpr instanceof VariableExpression) {
                     String varName = ((VariableExpression) leftExpr).getName();
                     for (ASTNode candidate : astVisitor.getNodes()) {
@@ -398,12 +398,12 @@ public class GroovyASTUtils {
                             if (decl.getVariableExpression() != null
                                     && varName.equals(decl.getVariableExpression().getName())) {
                                 ClassNode origin = decl.getVariableExpression().getOriginType();
-                                if (origin != null && origin != ClassHelper.DYNAMIC_TYPE) {
+                                if (origin != null && !ClassHelper.isDynamicTyped(origin)) {
                                     leftType = origin;
                                     break;
                                 }
                                 ClassNode varType = decl.getVariableExpression().getType();
-                                if (varType != null && varType != ClassHelper.DYNAMIC_TYPE) {
+                                if (varType != null && !ClassHelper.isDynamicTyped(varType)) {
                                     leftType = varType;
                                     break;
                                 }
@@ -535,7 +535,7 @@ public class GroovyASTUtils {
             if (var.getOriginType() != null) {
                 return var.getOriginType();
             }
-            if (var.getType() != null && var.getType() != ClassHelper.DYNAMIC_TYPE) {
+            if (var.getType() != null && !ClassHelper.isDynamicTyped(var.getType())) {
                 return var.getType();
             }
             if (var.getName() != null) {
@@ -563,7 +563,7 @@ public class GroovyASTUtils {
         ClassNode declaredType = method.getReturnType();
         boolean dynamicReturnType = method.isDynamicReturnType();
         if (!dynamicReturnType && declaredType != null
-                && declaredType != ClassHelper.DYNAMIC_TYPE
+                && !ClassHelper.isDynamicTyped(declaredType)
                 && declaredType != ClassHelper.OBJECT_TYPE) {
             return declaredType;
         }

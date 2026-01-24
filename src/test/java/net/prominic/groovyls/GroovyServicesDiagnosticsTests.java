@@ -120,17 +120,21 @@ class GroovyServicesDiagnosticsTests {
 		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
 
 		String invalidSource1 = "class Diagnostics { def x = }";
+		TextDocumentContentChangeEvent changeEvent1 = new TextDocumentContentChangeEvent();
+		changeEvent1.setRange(null);
+		changeEvent1.setText(invalidSource1);
 		DidChangeTextDocumentParams changeParams1 = new DidChangeTextDocumentParams();
 		changeParams1.setTextDocument(new VersionedTextDocumentIdentifier(uri, 2));
-		changeParams1.setContentChanges(Collections
-				.singletonList(new TextDocumentContentChangeEvent(null, 0, invalidSource1)));
+		changeParams1.setContentChanges(Collections.singletonList(changeEvent1));
 		services.didChange(changeParams1);
 
 		String invalidSource2 = "class Diagnostics { def y = }";
+		TextDocumentContentChangeEvent changeEvent2 = new TextDocumentContentChangeEvent();
+		changeEvent2.setRange(null);
+		changeEvent2.setText(invalidSource2);
 		DidChangeTextDocumentParams changeParams2 = new DidChangeTextDocumentParams();
 		changeParams2.setTextDocument(new VersionedTextDocumentIdentifier(uri, 3));
-		changeParams2.setContentChanges(Collections
-				.singletonList(new TextDocumentContentChangeEvent(null, 0, invalidSource2)));
+		changeParams2.setContentChanges(Collections.singletonList(changeEvent2));
 		services.didChange(changeParams2);
 
 		boolean published = publishLatch.await(2, TimeUnit.SECONDS);
@@ -161,5 +165,58 @@ class GroovyServicesDiagnosticsTests {
 		Assertions.assertEquals(uri, diagnostics.getUri());
 		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
 				.anyMatch(diag -> "Undefined variable: missingVar".equals(diag.getMessage())));
+	}
+
+	@Test
+	void testCodeInspectionDiagnostics() throws Exception {
+		Path filePath = srcRoot.resolve("Inspection.groovy");
+		String uri = filePath.toUri().toString();
+		String longText = "a".repeat(130);
+		String source = String.join("\n",
+				"import java.util.Map as Alias",
+				"",
+				"class Inspection {",
+				"  void emptyMethod() { }",
+				"  void testMethod() {",
+				"    String value = (String) 'hello'",
+				"    boolean flag = true",
+				"    if (flag == true) {",
+				"      println value",
+				"    }",
+				"    if (flag) { }",
+				"    ;",
+				"    def trailing = 1  ",
+				"    def longLine = '" + longText + "'",
+				"  }",
+				"  void dupOne() {",
+				"    println 'dup'",
+				"  }",
+				"  void dupTwo() {",
+				"    println 'dup'",
+				"  }",
+				"}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, source);
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		boolean published = publishLatch.await(2, TimeUnit.SECONDS);
+		Assertions.assertTrue(published, "Expected diagnostics to be published");
+		PublishDiagnosticsParams diagnostics = lastDiagnostics.get();
+		Assertions.assertNotNull(diagnostics);
+		Assertions.assertEquals(uri, diagnostics.getUri());
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Unused import: Alias".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Redundant cast".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Unnecessary semicolon".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Empty block".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Duplicate code detected".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Line exceeds 120 characters".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Trailing whitespace".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Simplify boolean comparison".equals(diag.getMessage())));
 	}
 }

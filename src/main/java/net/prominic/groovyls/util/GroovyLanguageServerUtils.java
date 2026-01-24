@@ -29,11 +29,13 @@ import org.codehaus.groovy.ast.PropertyNode;
 import org.codehaus.groovy.ast.Variable;
 import org.codehaus.groovy.syntax.SyntaxException;
 import org.eclipse.lsp4j.CompletionItemKind;
+import org.eclipse.lsp4j.DocumentSymbol;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
-import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.SymbolKind;
+import org.eclipse.lsp4j.WorkspaceSymbol;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 
 public class GroovyLanguageServerUtils {
 	/**
@@ -141,38 +143,58 @@ public class GroovyLanguageServerUtils {
 		return new Location(uri.toString(), range);
 	}
 
-	public static SymbolInformation astNodeToSymbolInformation(ClassNode node, URI uri, String parentName) {
-		Location location = astNodeToLocation(node, uri);
-		if (location == null) {
-			return null;
-		}
-		SymbolKind symbolKind = astNodeToSymbolKind(node);
-		return new SymbolInformation(node.getName(), symbolKind, location,
-				parentName);
+	public static DocumentSymbol astNodeToDocumentSymbol(ClassNode node) {
+		return createDocumentSymbol(node, node.getName());
 	}
 
-	public static SymbolInformation astNodeToSymbolInformation(MethodNode node, URI uri, String parentName) {
-		Location location = astNodeToLocation(node, uri);
-		if (location == null) {
-			return null;
-		}
-		SymbolKind symbolKind = astNodeToSymbolKind(node);
-		return new SymbolInformation(node.getName(), symbolKind, location,
-				parentName);
+	public static DocumentSymbol astNodeToDocumentSymbol(MethodNode node) {
+		return createDocumentSymbol(node, node.getName());
 	}
 
-	public static SymbolInformation astNodeToSymbolInformation(Variable node, URI uri, String parentName) {
+	public static DocumentSymbol astNodeToDocumentSymbol(Variable node) {
 		if (!(node instanceof ASTNode)) {
 			// DynamicVariable isn't an ASTNode
 			return null;
 		}
-		ASTNode astVar = (ASTNode) node;
-		Location location = astNodeToLocation(astVar, uri);
+		return createDocumentSymbol((ASTNode) node, node.getName());
+	}
+
+	public static WorkspaceSymbol astNodeToWorkspaceSymbol(ClassNode node, URI uri, String parentName) {
+		return createWorkspaceSymbol(node, node.getName(), uri, parentName);
+	}
+
+	public static WorkspaceSymbol astNodeToWorkspaceSymbol(MethodNode node, URI uri, String parentName) {
+		return createWorkspaceSymbol(node, node.getName(), uri, parentName);
+	}
+
+	public static WorkspaceSymbol astNodeToWorkspaceSymbol(Variable node, URI uri, String parentName) {
+		if (!(node instanceof ASTNode)) {
+			// DynamicVariable isn't an ASTNode
+			return null;
+		}
+		return createWorkspaceSymbol((ASTNode) node, node.getName(), uri, parentName);
+	}
+
+	private static DocumentSymbol createDocumentSymbol(ASTNode node, String name) {
+		Range range = astNodeToRange(node);
+		if (range == null) {
+			return null;
+		}
+		SymbolKind symbolKind = astNodeToSymbolKind(node);
+		return new DocumentSymbol(name, symbolKind, range, range);
+	}
+
+	private static WorkspaceSymbol createWorkspaceSymbol(ASTNode node, String name, URI uri, String parentName) {
+		Location location = astNodeToLocation(node, uri);
 		if (location == null) {
 			return null;
 		}
-		SymbolKind symbolKind = astNodeToSymbolKind(astVar);
-		return new SymbolInformation(node.getName(), symbolKind, location,
-				parentName);
+		SymbolKind symbolKind = astNodeToSymbolKind(node);
+		WorkspaceSymbol info = new WorkspaceSymbol();
+		info.setName(name);
+		info.setKind(symbolKind);
+		info.setLocation(Either.forLeft(location));
+		info.setContainerName(parentName);
+		return info;
 	}
 }
