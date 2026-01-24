@@ -223,7 +223,7 @@ public class FormattingProvider {
 		if (line.indexOf('{') == -1 && line.indexOf('}') == -1) {
 			return line;
 		}
-		if (line.indexOf('"') != -1 || line.indexOf('\'') != -1) {
+		if (hasBraceInsideString(line)) {
 			return line;
 		}
 		if (settings.isSpaceInsideBraces()) {
@@ -259,6 +259,34 @@ public class FormattingProvider {
 		return index;
 	}
 
+	private boolean hasBraceInsideString(String line) {
+		boolean inSingleQuote = false;
+		boolean inDoubleQuote = false;
+		for (int i = 0; i < line.length(); i++) {
+			char character = line.charAt(i);
+			if (character == '\\') {
+				if (i + 1 < line.length()) {
+					i++;
+				}
+				continue;
+			}
+			if (character == '\'' && !inDoubleQuote) {
+				inSingleQuote = !inSingleQuote;
+				continue;
+			}
+			if (character == '"' && !inSingleQuote) {
+				inDoubleQuote = !inDoubleQuote;
+				continue;
+			}
+			if (inSingleQuote || inDoubleQuote) {
+				if (character == '{' || character == '}') {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	private String matchOperator(String line, int index) {
 		for (String operator : OPERATORS) {
 			if (line.startsWith(operator, index)) {
@@ -269,7 +297,7 @@ public class FormattingProvider {
 	}
 
 	private boolean shouldSpaceOperator(String operator) {
-        return !NO_SPACE_OPERATORS.contains(operator);
+		return !NO_SPACE_OPERATORS.contains(operator);
 	}
 
 	private void trimTrailingWhitespace(StringBuilder builder) {
@@ -339,9 +367,9 @@ public class FormattingProvider {
 		String[] split = contents.split(LINE_BREAK, -1);
 		List<String> lines = new ArrayList<>();
 		Collections.addAll(lines, split);
-        if (lines.isEmpty()) {
-            lines.add("");
-        }
+		if (lines.isEmpty()) {
+			lines.add("");
+		}
 		return lines;
 	}
 }
