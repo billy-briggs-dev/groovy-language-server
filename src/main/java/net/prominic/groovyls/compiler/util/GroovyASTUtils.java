@@ -932,14 +932,11 @@ public class GroovyASTUtils {
         for (Parameter param : params) {
             ClassNode type = param.getType();
             boolean isClosure = type != null && "groovy.lang.Closure".equals(type.getName());
-            if (isClosure) {
-                continue;
-            }
             ClassNode resolved = resolveDslMarkerOwner(param);
             if (resolved != null) {
                 return resolved;
             }
-            if (methodMarked && fallback == null && type != null) {
+            if (methodMarked && !isClosure && fallback == null && type != null) {
                 fallback = type;
             }
         }
