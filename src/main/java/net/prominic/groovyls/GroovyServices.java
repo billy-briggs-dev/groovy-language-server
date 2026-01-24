@@ -49,6 +49,7 @@ import org.codehaus.groovy.GroovyBugError;
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.DynamicVariable;
+import org.codehaus.groovy.ast.ImportNode;
 import org.codehaus.groovy.ast.Variable;
 import org.codehaus.groovy.ast.expr.VariableExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
@@ -645,6 +646,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			diagnosticsVisitor.visitCompilationUnit(compilationUnit);
 		}
 		collectUndefinedVariableDiagnostics(diagnosticsByFile, diagnosticsVisitor);
+		collectUnusedImportDiagnostics(diagnosticsByFile, diagnosticsVisitor);
 
 		Set<PublishDiagnosticsParams> result = diagnosticsByFile.entrySet().stream()
 				.map(entry -> new PublishDiagnosticsParams(entry.getKey().toString(), entry.getValue()))
@@ -726,6 +728,233 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			diagnostic.setMessage("Undefined variable: " + name);
 			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
 		}
+	}
+
+	private void collectUnusedImportDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile,
+			ASTNodeVisitor visitor) {
+		if (visitor == null || fileContentsTracker == null) {
+			return;
+		}
+		Map<URI, List<ImportNode>> importsByUri = new HashMap<>();
+		for (ASTNode node : visitor.getNodes()) {
+			if (!(node instanceof ImportNode)) {
+				continue;
+			}
+			ImportNode importNode = (ImportNode) node;
+			if (importNode.isStar() || importNode.isStatic()) {
+				continue;
+			}
+			Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+			if (range == null) {
+				continue;
+			}
+			URI uri = visitor.getURI(importNode);
+			if (uri == null) {
+				continue;
+			}
+			importsByUri.computeIfAbsent(uri, key -> new ArrayList<>()).add(importNode);
+		}
+		Map<String, Pattern> patternCache = new HashMap<>();
+		Set<URI> urisToScan = new HashSet<>(importsByUri.keySet());
+		urisToScan.addAll(fileContentsTracker.getOpenURIs());
+		for (URI uri : urisToScan) {
+			List<ImportNode> importNodes = importsByUri.getOrDefault(uri, Collections.emptyList());
+			String contents = fileContentsTracker.getContents(uri);
+			if (contents == null) {
+				continue;
+			}
+			if (importNodes.isEmpty()) {
+				collectUnusedImportsFromSource(uri, contents, diagnosticsByFile, patternCache);
+				continue;
+			}
+			Set<Integer> importLines = new HashSet<>();
+			for (ImportNode importNode : importNodes) {
+				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+				if (range == null) {
+					range = findImportRange(contents, importNode);
+				}
+				if (range != null) {
+					importLines.add(range.getStart().getLine());
+				}
+			}
+			String searchContent = removeImportLines(contents, importLines);
+			for (ImportNode importNode : importNodes) {
+				String importName = importNode.getAlias();
+				ClassNode importType = importNode.getType();
+				if (importName == null || importName.isBlank()) {
+					if (importType == null) {
+						continue;
+					}
+					importName = importType.getNameWithoutPackage();
+				}
+				if (importName == null || importName.isBlank()) {
+					continue;
+				}
+				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+				if (range == null) {
+					range = findImportRange(contents, importNode);
+				}
+				if (range == null) {
+					range = new Range(new Position(0, 0), new Position(0, 0));
+				}
+				if (isImportNameUsed(searchContent, importName, importType, patternCache)) {
+					continue;
+				}
+				Diagnostic diagnostic = new Diagnostic();
+				diagnostic.setRange(range);
+				diagnostic.setSeverity(DiagnosticSeverity.Warning);
+				diagnostic.setMessage("Unused import: " + importName);
+				diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
+			}
+		}
+	}
+
+	private void collectUnusedImportsFromSource(URI uri, String contents,
+			Map<URI, List<Diagnostic>> diagnosticsByFile, Map<String, Pattern> patternCache) {
+		if (contents == null) {
+			return;
+		}
+		List<ImportInfo> imports = parseImportInfos(contents);
+		if (imports.isEmpty()) {
+			return;
+		}
+		Set<Integer> importLines = new HashSet<>();
+		for (ImportInfo info : imports) {
+			importLines.add(info.line);
+		}
+		String searchContent = removeImportLines(contents, importLines);
+		for (ImportInfo info : imports) {
+			if (isImportNameUsedText(searchContent, info.importName, info.fullName, patternCache)) {
+				continue;
+			}
+			Diagnostic diagnostic = new Diagnostic();
+			diagnostic.setRange(new Range(new Position(info.line, 0), new Position(info.line, 0)));
+			diagnostic.setSeverity(DiagnosticSeverity.Warning);
+			diagnostic.setMessage("Unused import: " + info.importName);
+			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
+		}
+	}
+
+	private List<ImportInfo> parseImportInfos(String contents) {
+		List<ImportInfo> results = new ArrayList<>();
+		String[] lines = contents.split("\\R", -1);
+		for (int i = 0; i < lines.length; i++) {
+			String line = lines[i].trim();
+			if (!line.startsWith("import ") || line.startsWith("import static ")) {
+				continue;
+			}
+			String remainder = line.substring("import ".length()).trim();
+			if (remainder.endsWith(".*")) {
+				continue;
+			}
+			String importName = null;
+			String fullName = remainder;
+			int asIndex = remainder.indexOf(" as ");
+			if (asIndex > -1) {
+				fullName = remainder.substring(0, asIndex).trim();
+				importName = remainder.substring(asIndex + 4).trim();
+			}
+			if (importName == null || importName.isBlank()) {
+				int lastDot = fullName.lastIndexOf('.');
+				importName = lastDot > -1 ? fullName.substring(lastDot + 1) : fullName;
+			}
+			if (importName == null || importName.isBlank()) {
+				continue;
+			}
+			results.add(new ImportInfo(importName, fullName, i));
+		}
+		return results;
+	}
+
+	private boolean isImportNameUsedText(String contents, String importName, String fullName,
+			Map<String, Pattern> patternCache) {
+		if (contents == null || importName == null || importName.isBlank()) {
+			return false;
+		}
+		Pattern pattern = patternCache.computeIfAbsent(importName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
+		if (pattern.matcher(contents).find()) {
+			return true;
+		}
+		if (fullName == null || fullName.isBlank() || fullName.equals(importName)) {
+			return false;
+		}
+		Pattern qualifiedPattern = patternCache.computeIfAbsent(fullName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
+		return qualifiedPattern.matcher(contents).find();
+	}
+
+	private static class ImportInfo {
+		final String importName;
+		final String fullName;
+		final int line;
+
+		ImportInfo(String importName, String fullName, int line) {
+			this.importName = importName;
+			this.fullName = fullName;
+			this.line = line;
+		}
+	}
+
+	private String removeImportLines(String contents, Set<Integer> importLines) {
+		if (contents == null || importLines == null || importLines.isEmpty()) {
+			return contents;
+		}
+		String[] lines = contents.split("\\R", -1);
+		StringBuilder builder = new StringBuilder(contents.length());
+		for (int i = 0; i < lines.length; i++) {
+			if (!importLines.contains(i)) {
+				builder.append(lines[i]);
+			}
+			if (i < lines.length - 1) {
+				builder.append("\n");
+			}
+		}
+		return builder.toString();
+	}
+
+	private boolean isImportNameUsed(String contents, String importName, ClassNode importType,
+			Map<String, Pattern> patternCache) {
+		if (contents == null || importName == null || importName.isBlank()) {
+			return false;
+		}
+		Pattern pattern = patternCache.computeIfAbsent(importName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
+		if (pattern.matcher(contents).find()) {
+			return true;
+		}
+		if (importType == null) {
+			return false;
+		}
+		String fullName = importType.getName();
+		if (fullName == null || fullName.isBlank() || fullName.equals(importName)) {
+			return false;
+		}
+		Pattern qualifiedPattern = patternCache.computeIfAbsent(fullName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
+		return qualifiedPattern.matcher(contents).find();
+	}
+
+	private Range findImportRange(String contents, ImportNode importNode) {
+		if (contents == null || importNode == null) {
+			return null;
+		}
+		ClassNode type = importNode.getType();
+		String fullName = type != null ? type.getName() : null;
+		String alias = importNode.getAlias();
+		String target = fullName != null ? fullName : alias;
+		if (target == null || target.isBlank()) {
+			return null;
+		}
+		String[] lines = contents.split("\\R", -1);
+		String importText = "import " + target;
+		for (int i = 0; i < lines.length; i++) {
+			String line = lines[i];
+			if (line.contains(importText)) {
+				return new Range(new Position(i, 0), new Position(i, line.length()));
+			}
+		}
+		return null;
 	}
 
 	private boolean isClassName(String name, ASTNodeVisitor visitor) {

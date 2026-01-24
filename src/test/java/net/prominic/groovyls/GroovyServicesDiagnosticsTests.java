@@ -31,11 +31,14 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
+import org.eclipse.lsp4j.HoverParams;
 import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
+import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.services.LanguageClient;
@@ -161,5 +164,38 @@ class GroovyServicesDiagnosticsTests {
 		Assertions.assertEquals(uri, diagnostics.getUri());
 		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
 				.anyMatch(diag -> "Undefined variable: missingVar".equals(diag.getMessage())));
+	}
+
+	@Test
+	void testUnusedImportDiagnostic() throws Exception {
+		Path filePath = srcRoot.resolve("Diagnostics.groovy");
+		String uri = filePath.toUri().toString();
+		String source = String.join("\n",
+				"import java.util.List",
+				"class Diagnostics {",
+				"  void testMethod() {",
+				"    def value = 'abc'",
+				"  }",
+				"}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, source);
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		services.hover(new HoverParams(new TextDocumentIdentifier(uri), new Position(0, 0))).get();
+		PublishDiagnosticsParams diagnostics = awaitDiagnosticsMessage(uri, "Unused import: List", 2000);
+		Assertions.assertNotNull(diagnostics, "Expected diagnostics to include unused import");
+	}
+
+	private PublishDiagnosticsParams awaitDiagnosticsMessage(String uri, String message, long timeoutMillis)
+			throws InterruptedException {
+		long deadline = System.currentTimeMillis() + timeoutMillis;
+		while (System.currentTimeMillis() < deadline) {
+			PublishDiagnosticsParams diagnostics = lastDiagnostics.get();
+			if (diagnostics != null && uri.equals(diagnostics.getUri())
+					&& diagnostics.getDiagnostics().stream()
+							.anyMatch(diag -> message.equals(diag.getMessage()))) {
+				return diagnostics;
+			}
+			Thread.sleep(50);
+		}
+		return lastDiagnostics.get();
 	}
 }
