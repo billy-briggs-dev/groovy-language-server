@@ -58,12 +58,12 @@ public class GroovydocUtilsTests {
 		String markdown = GroovydocUtils.groovydocToMarkdownDescription(new Groovydoc(content, new TestGroovydocHolder()));
 
 		Assertions.assertNotNull(markdown);
-		Assertions.assertTrue(markdown.contains(
-				"[java.util.List](https://docs.oracle.com/en/java/javase/21/docs/api/java/util/List.html)"));
+		Assertions.assertTrue(markdown.contains("[java.util.List](https://docs.oracle.com/en/java/javase/"
+				+ Runtime.version().feature() + "/docs/api/java/util/List.html)"));
 		Assertions.assertTrue(markdown.contains(
 				"[groovy.lang.Closure](https://docs.groovy-lang.org/latest/html/api/groovy/lang/Closure.html)"));
-		Assertions.assertTrue(
-				markdown.contains("[java.lang.String](https://docs.oracle.com/en/java/javase/21/docs/api/java/lang/String.html)"));
+		Assertions.assertTrue(markdown.contains("[java.lang.String](https://docs.oracle.com/en/java/javase/"
+				+ Runtime.version().feature() + "/docs/api/java/lang/String.html)"));
 		Assertions.assertTrue(markdown.contains("See also:"));
 	}
 }
