@@ -754,27 +754,28 @@ public class GroovyASTUtils {
         if (method == null) {
             method = resolveMethodByName(call, astVisitor);
         }
+        ClassNode dslFallback = resolveDslMarkerType(call, astVisitor);
         if (method == null) {
-            return resolveDslMarkerType(call, astVisitor);
+            return dslFallback;
         }
         int index = findClosureArgumentIndex(call, closure);
         if (index < 0) {
             index = findClosureParameterIndex(method);
         }
         if (index < 0 || index >= method.getParameters().length) {
-            return resolveDslMarkerType(call, astVisitor);
+            return dslFallback;
         }
         Parameter parameter = method.getParameters()[index];
         AnnotationNode delegatesTo = findAnnotation(parameter, DELEGATES_TO_ANNOTATIONS);
         if (delegatesTo == null) {
-            return resolveDslMarkerType(call, astVisitor);
+            return dslFallback;
         }
         Expression value = delegatesTo.getMember("value");
         ClassNode resolved = resolveClassNodeFromExpression(value);
         if (resolved != null) {
             return resolved;
         }
-        return parameter.getType() != null ? parameter.getType() : resolveDslMarkerType(call, astVisitor);
+        return parameter.getType() != null ? parameter.getType() : dslFallback;
     }
 
     private static ClassNode resolveDslMarkerType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
@@ -794,20 +795,7 @@ public class GroovyASTUtils {
 
     private static ClassNode findDslMarkerOwnerType(MethodCallExpression call, ASTNodeVisitor astVisitor,
             String methodName) {
-        ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
-        if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
-            owner = ((ClassExpression) call.getObjectExpression()).getType();
-        }
-        if (owner == null && call.getObjectExpression() instanceof VariableExpression) {
-            String name = ((VariableExpression) call.getObjectExpression()).getName();
-            owner = findClassNodeByName(name, astVisitor);
-        }
-        if (owner == null && call.isImplicitThis()) {
-            ASTNode enclosingClass = getEnclosingNodeOfType(call, ClassNode.class, astVisitor);
-            if (enclosingClass instanceof ClassNode) {
-                owner = (ClassNode) enclosingClass;
-            }
-        }
+        ClassNode owner = resolveCallOwnerType(call, astVisitor);
         if (owner == null) {
             return null;
         }
@@ -829,6 +817,17 @@ public class GroovyASTUtils {
         if (call == null || astVisitor == null) {
             return null;
         }
+        ClassNode owner = resolveCallOwnerType(call, astVisitor);
+        if (owner == null) {
+            return null;
+        }
+        if (hasAnnotation(owner, DSL_MARKER_ANNOTATIONS)) {
+            return owner;
+        }
+        return null;
+    }
+
+    private static ClassNode resolveCallOwnerType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
         ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
         if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
             owner = ((ClassExpression) call.getObjectExpression()).getType();
@@ -843,13 +842,7 @@ public class GroovyASTUtils {
                 owner = (ClassNode) enclosingClass;
             }
         }
-        if (owner == null) {
-            return null;
-        }
-        if (hasAnnotation(owner, DSL_MARKER_ANNOTATIONS)) {
-            return owner;
-        }
-        return null;
+        return owner;
     }
 
     private static boolean hasAnnotation(AnnotatedNode node, List<String> names) {
