@@ -116,6 +116,16 @@
         "category": "Groovy"
       },
       {
+        "command": "groovy.findUsages",
+        "title": "Find Groovy Usages",
+        "category": "Groovy"
+      },
+      {
+        "command": "groovy.goToSuperMethod",
+        "title": "Go to Super Method",
+        "category": "Groovy"
+      },
+      {
         "command": "groovy.addClasspathJars",
         "title": "Add JARs to Groovy classpath",
         "category": "Groovy"
@@ -131,6 +141,14 @@
         "category": "Groovy"
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "groovyUsages",
+          "name": "Groovy Usages"
+        }
+      ]
+    },
     "configuration": {
       "type": "object",
       "description": "Groovy configuration",

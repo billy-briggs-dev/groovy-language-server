@@ -20,10 +20,12 @@
 package net.prominic.groovyls.providers;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.ClassNode;
@@ -36,7 +38,6 @@ import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 
 import net.prominic.groovyls.compiler.ast.ASTNodeVisitor;
-import net.prominic.groovyls.compiler.util.GroovyASTUtils;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 
 public class DocumentSymbolProvider {
@@ -55,32 +56,50 @@ public class DocumentSymbolProvider {
 		}
 		URI uri = URI.create(textDocument.getUri());
 		List<ASTNode> nodes = ast.getNodes(uri);
-		List<Either<SymbolInformation, DocumentSymbol>> symbols = nodes.stream().filter(node -> {
-			return node instanceof ClassNode || node instanceof MethodNode || node instanceof FieldNode
-					|| node instanceof PropertyNode;
-		}).map(node -> {
+		Map<ASTNode, DocumentSymbol> symbolByNode = new HashMap<>();
+		List<ASTNode> symbolNodes = new ArrayList<>();
+		for (ASTNode node : nodes) {
+			DocumentSymbol symbol = null;
 			if (node instanceof ClassNode) {
-				ClassNode classNode = (ClassNode) node;
-				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(classNode);
+				symbol = GroovyLanguageServerUtils.astNodeToDocumentSymbol((ClassNode) node);
+			} else if (node instanceof MethodNode) {
+				symbol = GroovyLanguageServerUtils.astNodeToDocumentSymbol((MethodNode) node);
+			} else if (node instanceof PropertyNode) {
+				symbol = GroovyLanguageServerUtils.astNodeToDocumentSymbol((PropertyNode) node);
+			} else if (node instanceof FieldNode) {
+				symbol = GroovyLanguageServerUtils.astNodeToDocumentSymbol((FieldNode) node);
 			}
-			ClassNode classNode = (ClassNode) GroovyASTUtils.getEnclosingNodeOfType(node, ClassNode.class, ast);
-			if (node instanceof MethodNode) {
-				MethodNode methodNode = (MethodNode) node;
-				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(methodNode);
+			if (symbol != null) {
+				symbolByNode.put(node, symbol);
+				symbolNodes.add(node);
 			}
-			if (node instanceof PropertyNode) {
-				PropertyNode propNode = (PropertyNode) node;
-				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(propNode);
+		}
+
+		List<DocumentSymbol> rootSymbols = new ArrayList<>();
+		for (ASTNode node : symbolNodes) {
+			DocumentSymbol symbol = symbolByNode.get(node);
+			ASTNode parent = ast.getParent(node);
+			DocumentSymbol parentSymbol = null;
+			while (parent != null && parentSymbol == null) {
+				parentSymbol = symbolByNode.get(parent);
+				parent = ast.getParent(parent);
 			}
-			if (node instanceof FieldNode) {
-				FieldNode fieldNode = (FieldNode) node;
-				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(fieldNode);
+			if (parentSymbol != null) {
+				List<DocumentSymbol> children = parentSymbol.getChildren();
+				if (children == null) {
+					children = new ArrayList<>();
+					parentSymbol.setChildren(children);
+				}
+				children.add(symbol);
+			} else {
+				rootSymbols.add(symbol);
 			}
-			// this should never happen
-			return null;
-		}).filter(symbolInformation -> symbolInformation != null).map(node -> {
-			return Either.<SymbolInformation, DocumentSymbol>forRight(node);
-		}).collect(Collectors.toList());
-		return CompletableFuture.completedFuture(symbols);
+		}
+
+		List<Either<SymbolInformation, DocumentSymbol>> result = new ArrayList<>();
+		for (DocumentSymbol symbol : rootSymbols) {
+			result.add(Either.forRight(symbol));
+		}
+		return CompletableFuture.completedFuture(result);
 	}
 }

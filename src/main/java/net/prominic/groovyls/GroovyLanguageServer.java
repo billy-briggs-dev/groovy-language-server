@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 
 import org.eclipse.lsp4j.CompletionOptions;
+import org.eclipse.lsp4j.ExecuteCommandOptions;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.ServerCapabilities;
@@ -92,6 +93,9 @@ public class GroovyLanguageServer implements LanguageServer, LanguageClientAware
         serverCapabilities.setReferencesProvider(true);
         serverCapabilities.setDefinitionProvider(true);
         serverCapabilities.setTypeDefinitionProvider(true);
+        serverCapabilities.setImplementationProvider(true);
+        serverCapabilities.setTypeHierarchyProvider(true);
+        serverCapabilities.setCallHierarchyProvider(true);
         serverCapabilities.setHoverProvider(true);
         serverCapabilities.setRenameProvider(true);
         serverCapabilities.setDocumentFormattingProvider(true);
@@ -99,6 +103,8 @@ public class GroovyLanguageServer implements LanguageServer, LanguageClientAware
         SignatureHelpOptions signatureHelpOptions = new SignatureHelpOptions();
         signatureHelpOptions.setTriggerCharacters(Arrays.asList("(", ","));
         serverCapabilities.setSignatureHelpProvider(signatureHelpOptions);
+        serverCapabilities.setExecuteCommandProvider(
+                new ExecuteCommandOptions(Arrays.asList("groovy.findUsages", "groovy.goToSuperMethod")));
 
         InitializeResult initializeResult = new InitializeResult(serverCapabilities);
         return CompletableFuture.completedFuture(initializeResult);

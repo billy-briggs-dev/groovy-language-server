@@ -94,13 +94,19 @@ import org.eclipse.lsp4j.DocumentFormattingParams;
 import org.eclipse.lsp4j.DocumentRangeFormattingParams;
 import org.eclipse.lsp4j.DocumentSymbol;
 import org.eclipse.lsp4j.DocumentSymbolParams;
+import org.eclipse.lsp4j.ExecuteCommandParams;
 import org.eclipse.lsp4j.Hover;
 import org.eclipse.lsp4j.HoverParams;
+import org.eclipse.lsp4j.ImplementationParams;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.LocationLink;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.TypeHierarchyItem;
+import org.eclipse.lsp4j.TypeHierarchyPrepareParams;
+import org.eclipse.lsp4j.TypeHierarchySubtypesParams;
+import org.eclipse.lsp4j.TypeHierarchySupertypesParams;
 import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.RenameParams;
 import org.eclipse.lsp4j.SignatureHelp;
@@ -114,6 +120,12 @@ import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
 import org.eclipse.lsp4j.WorkspaceSymbol;
+import org.eclipse.lsp4j.CallHierarchyIncomingCall;
+import org.eclipse.lsp4j.CallHierarchyItem;
+import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
+import org.eclipse.lsp4j.CallHierarchyPrepareParams;
+import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
+import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
@@ -128,15 +140,21 @@ import net.prominic.groovyls.compiler.ast.ASTNodeVisitor;
 import net.prominic.groovyls.compiler.control.GroovyLSCompilationUnit;
 import net.prominic.groovyls.config.ICompilationUnitFactory;
 import net.prominic.groovyls.providers.CompletionProvider;
+import net.prominic.groovyls.providers.CallHierarchyProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
+import net.prominic.groovyls.providers.ImplementationProvider;
 import net.prominic.groovyls.providers.FormattingProvider;
 import net.prominic.groovyls.providers.FormattingSettings;
 import net.prominic.groovyls.providers.HoverProvider;
 import net.prominic.groovyls.providers.ReferenceProvider;
 import net.prominic.groovyls.providers.RenameProvider;
 import net.prominic.groovyls.providers.SignatureHelpProvider;
+import net.prominic.groovyls.providers.SuperMethodProvider;
+import net.prominic.groovyls.providers.TypeHierarchyProvider;
 import net.prominic.groovyls.providers.TypeDefinitionProvider;
+import net.prominic.groovyls.providers.UsageItem;
+import net.prominic.groovyls.providers.UsageProvider;
 import net.prominic.groovyls.providers.WorkspaceSymbolProvider;
 import net.prominic.groovyls.util.FileContentsTracker;
 import net.prominic.groovyls.util.GradleClasspathResolver;
@@ -544,6 +562,63 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	}
 
 	@Override
+	public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> implementation(
+			ImplementationParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		ImplementationProvider provider = new ImplementationProvider(astVisitor);
+		return provider.provideImplementation(params.getTextDocument(), params.getPosition());
+	}
+
+	@Override
+	public CompletableFuture<List<TypeHierarchyItem>> prepareTypeHierarchy(TypeHierarchyPrepareParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		TypeHierarchyProvider provider = new TypeHierarchyProvider(astVisitor);
+		return provider.prepareTypeHierarchy(params.getTextDocument(), params.getPosition());
+	}
+
+	@Override
+	public CompletableFuture<List<TypeHierarchyItem>> typeHierarchySupertypes(TypeHierarchySupertypesParams params) {
+		ensureAstAvailable();
+		TypeHierarchyProvider provider = new TypeHierarchyProvider(astVisitor);
+		return provider.provideSupertypes(params.getItem());
+	}
+
+	@Override
+	public CompletableFuture<List<TypeHierarchyItem>> typeHierarchySubtypes(TypeHierarchySubtypesParams params) {
+		ensureAstAvailable();
+		TypeHierarchyProvider provider = new TypeHierarchyProvider(astVisitor);
+		return provider.provideSubtypes(params.getItem());
+	}
+
+	@Override
+	public CompletableFuture<List<CallHierarchyItem>> prepareCallHierarchy(CallHierarchyPrepareParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+		CallHierarchyProvider provider = new CallHierarchyProvider(astVisitor);
+		return provider.prepareCallHierarchy(params.getTextDocument(), params.getPosition());
+	}
+
+	@Override
+	public CompletableFuture<List<CallHierarchyIncomingCall>> callHierarchyIncomingCalls(
+			CallHierarchyIncomingCallsParams params) {
+		ensureAstAvailable();
+		CallHierarchyProvider provider = new CallHierarchyProvider(astVisitor);
+		return provider.provideIncomingCalls(params.getItem());
+	}
+
+	@Override
+	public CompletableFuture<List<CallHierarchyOutgoingCall>> callHierarchyOutgoingCalls(
+			CallHierarchyOutgoingCallsParams params) {
+		ensureAstAvailable();
+		CallHierarchyProvider provider = new CallHierarchyProvider(astVisitor);
+		return provider.provideOutgoingCalls(params.getItem());
+	}
+
+	@Override
 	public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
 		ensureCompiledForRequest(uri);
@@ -577,6 +652,89 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		RenameProvider provider = new RenameProvider(astVisitor, fileContentsTracker);
 		return provider.provideRename(params);
+	}
+
+	@Override
+	public CompletableFuture<Object> executeCommand(ExecuteCommandParams params) {
+		if (params == null || params.getCommand() == null) {
+			return CompletableFuture.completedFuture(null);
+		}
+		switch (params.getCommand()) {
+			case "groovy.findUsages":
+				return CompletableFuture.completedFuture(handleFindUsages(params));
+			case "groovy.goToSuperMethod":
+				return CompletableFuture.completedFuture(handleGoToSuperMethod(params));
+			default:
+				return CompletableFuture.completedFuture(null);
+		}
+	}
+
+	private Object handleFindUsages(ExecuteCommandParams params) {
+		if (params.getArguments() == null || params.getArguments().isEmpty()) {
+			return Collections.emptyList();
+		}
+		Object arg = params.getArguments().get(0);
+		JsonObject payload = toJsonObject(arg);
+		if (payload == null || !payload.has("textDocument") || !payload.has("position")) {
+			return Collections.emptyList();
+		}
+		JsonObject textDocument = payload.getAsJsonObject("textDocument");
+		JsonObject position = payload.getAsJsonObject("position");
+		String uriValue = textDocument.has("uri") ? textDocument.get("uri").getAsString() : null;
+		if (uriValue == null) {
+			return Collections.emptyList();
+		}
+		int line = position.has("line") ? position.get("line").getAsInt() : 0;
+		int character = position.has("character") ? position.get("character").getAsInt() : 0;
+		List<String> filters = new ArrayList<>();
+		if (payload.has("filters") && payload.get("filters").isJsonArray()) {
+			JsonArray filterArray = payload.getAsJsonArray("filters");
+			filterArray.forEach(element -> {
+				if (element != null && element.isJsonPrimitive()) {
+					filters.add(element.getAsString());
+				}
+			});
+		}
+		TextDocumentIdentifier doc = new TextDocumentIdentifier(uriValue);
+		Position pos = new Position(line, character);
+		ensureCompiledForRequest(URI.create(uriValue));
+		UsageProvider provider = new UsageProvider(astVisitor);
+		List<UsageItem> usages = provider.provideUsages(doc, pos, new HashSet<>(filters));
+		return usages;
+	}
+
+	private Object handleGoToSuperMethod(ExecuteCommandParams params) {
+		if (params.getArguments() == null || params.getArguments().isEmpty()) {
+			return Collections.emptyList();
+		}
+		Object arg = params.getArguments().get(0);
+		JsonObject payload = toJsonObject(arg);
+		if (payload == null || !payload.has("textDocument") || !payload.has("position")) {
+			return Collections.emptyList();
+		}
+		JsonObject textDocument = payload.getAsJsonObject("textDocument");
+		JsonObject position = payload.getAsJsonObject("position");
+		String uriValue = textDocument.has("uri") ? textDocument.get("uri").getAsString() : null;
+		if (uriValue == null) {
+			return Collections.emptyList();
+		}
+		int line = position.has("line") ? position.get("line").getAsInt() : 0;
+		int character = position.has("character") ? position.get("character").getAsInt() : 0;
+		TextDocumentIdentifier doc = new TextDocumentIdentifier(uriValue);
+		Position pos = new Position(line, character);
+		ensureCompiledForRequest(URI.create(uriValue));
+		SuperMethodProvider provider = new SuperMethodProvider(astVisitor);
+		return provider.provideSuperMethod(doc, pos).join();
+	}
+
+	private JsonObject toJsonObject(Object arg) {
+		if (arg instanceof JsonObject) {
+			return (JsonObject) arg;
+		}
+		if (arg instanceof Map) {
+			return new com.google.gson.Gson().toJsonTree(arg).getAsJsonObject();
+		}
+		return null;
 	}
 
 	// --- INTERNAL

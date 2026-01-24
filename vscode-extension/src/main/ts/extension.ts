@@ -41,6 +41,7 @@ let languageClient: LanguageClient | null = null;
 let javaPath: string | null = null;
 let debugAdapterExecutable: DebugAdapterExecutable | null = null;
 let debugAdapterFactory: vscode.Disposable | null = null;
+let usagesProvider: GroovyUsagesProvider | null = null;
 
 async function addClasspathJars() {
   const uris = await vscode.window.showOpenDialog({
@@ -143,6 +144,14 @@ export function activate(context: vscode.ExtensionContext) {
   javaPath = findJava();
   vscode.workspace.onDidChangeConfiguration(onDidChangeConfiguration);
 
+  usagesProvider = new GroovyUsagesProvider();
+  context.subscriptions.push(
+    vscode.window.createTreeView("groovyUsages", {
+      treeDataProvider: usagesProvider,
+      showCollapseAll: true,
+    })
+  );
+
   vscode.commands.registerCommand(
     "groovy.restartServer",
     restartLanguageServer
@@ -159,6 +168,9 @@ export function activate(context: vscode.ExtensionContext) {
     "groovy.addMavenRepository",
     addMavenRepository
   );
+  vscode.commands.registerCommand("groovy.findUsages", findUsages);
+  vscode.commands.registerCommand("groovy.goToSuperMethod", goToSuperMethod);
+  vscode.commands.registerCommand("groovy.openUsage", openUsage);
 
   startLanguageServer();
 }
@@ -173,6 +185,275 @@ export function deactivate() {
     debugAdapterFactory = null;
   }
   extensionContext = null;
+}
+
+type UsageLocation = {
+  uri: string;
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+};
+
+type UsageItem = {
+  type: string;
+  location: UsageLocation;
+  symbolName?: string | null;
+};
+
+class GroovyUsagesProvider
+  implements vscode.TreeDataProvider<UsageTreeItem>
+{
+  private readonly _onDidChangeTreeData = new vscode.EventEmitter<
+    UsageTreeItem | undefined
+  >();
+  readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  private items: UsageItem[] = [];
+
+  setItems(items: UsageItem[]) {
+    this.items = items;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  clear() {
+    this.items = [];
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  getTreeItem(element: UsageTreeItem): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(element?: UsageTreeItem): vscode.ProviderResult<UsageTreeItem[]> {
+    if (!element) {
+      return this.getTypeGroups().map(
+        (group) =>
+          new UsageTreeItem(
+            group.typeLabel,
+            vscode.TreeItemCollapsibleState.Expanded,
+            undefined,
+            group.items
+          )
+      );
+    }
+
+    if (element.children) {
+      return element.children.map((usage) => {
+        const location = toVsCodeLocation(usage.location);
+        const label = formatUsageLabel(usage, location);
+        const item = new UsageTreeItem(
+          label,
+          vscode.TreeItemCollapsibleState.None,
+          usage,
+          undefined
+        );
+        item.command = {
+          command: "groovy.openUsage",
+          title: "Open Usage",
+          arguments: [usage],
+        };
+        item.resourceUri = location.uri;
+        return item;
+      });
+    }
+
+    return [];
+  }
+
+  private getTypeGroups(): Array<{ typeLabel: string; items: UsageItem[] }> {
+    const groups = new Map<string, UsageItem[]>();
+    for (const item of this.items) {
+      const label = formatTypeLabel(item.type);
+      const existing = groups.get(label) ?? [];
+      existing.push(item);
+      groups.set(label, existing);
+    }
+    return Array.from(groups.entries()).map(([typeLabel, items]) => ({
+      typeLabel,
+      items,
+    }));
+  }
+}
+
+class UsageTreeItem extends vscode.TreeItem {
+  constructor(
+    label: string,
+    collapsibleState: vscode.TreeItemCollapsibleState,
+    public readonly usage?: UsageItem,
+    public readonly children?: UsageItem[]
+  ) {
+    super(label, collapsibleState);
+    if (children) {
+      this.contextValue = "groovyUsageGroup";
+    } else if (usage) {
+      this.contextValue = "groovyUsageItem";
+    }
+  }
+}
+
+function toVsCodeLocation(location: UsageLocation): vscode.Location {
+  const uri = vscode.Uri.parse(location.uri);
+  const range = new vscode.Range(
+    location.range.start.line,
+    location.range.start.character,
+    location.range.end.line,
+    location.range.end.character
+  );
+  return new vscode.Location(uri, range);
+}
+
+function formatTypeLabel(type: string): string {
+  switch (type) {
+    case "methodCall":
+      return "Method Calls";
+    case "constructorCall":
+      return "Constructor Calls";
+    case "fieldAccess":
+      return "Field Access";
+    case "propertyAccess":
+      return "Property Access";
+    case "variableReference":
+      return "Variable References";
+    case "typeReference":
+      return "Type References";
+    case "declaration":
+      return "Declarations";
+    default:
+      return "References";
+  }
+}
+
+function formatUsageLabel(usage: UsageItem, location: vscode.Location): string {
+  const fileName = path.basename(location.uri.fsPath);
+  const line = location.range.start.line + 1;
+  const column = location.range.start.character + 1;
+  const name = usage.symbolName ? ` ${usage.symbolName}` : "";
+  return `${fileName}:${line}:${column}${name}`;
+}
+
+async function findUsages() {
+  if (!languageClient || !usagesProvider) {
+    return;
+  }
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+  await languageClient.onReady();
+
+  const filters = await pickUsageFilters();
+  const textDocument = languageClient.code2ProtocolConverter.asTextDocumentIdentifier(
+    editor.document
+  );
+  const position = languageClient.code2ProtocolConverter.asPosition(
+    editor.selection.active
+  );
+
+  const payload = {
+    textDocument,
+    position,
+    filters,
+  };
+
+  const result = (await languageClient.sendRequest("workspace/executeCommand", {
+    command: "groovy.findUsages",
+    arguments: [payload],
+  })) as UsageItem[];
+
+  usagesProvider.setItems(result ?? []);
+  if (!result || result.length === 0) {
+    vscode.window.showInformationMessage("No usages found.");
+  }
+}
+
+async function goToSuperMethod() {
+  if (!languageClient) {
+    return;
+  }
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+  await languageClient.onReady();
+
+  const textDocument = languageClient.code2ProtocolConverter.asTextDocumentIdentifier(
+    editor.document
+  );
+  const position = languageClient.code2ProtocolConverter.asPosition(
+    editor.selection.active
+  );
+  const payload = { textDocument, position };
+
+  const locations = (await languageClient.sendRequest(
+    "workspace/executeCommand",
+    {
+      command: "groovy.goToSuperMethod",
+      arguments: [payload],
+    }
+  )) as { uri: string; range: any }[];
+
+  if (!locations || locations.length === 0) {
+    vscode.window.showInformationMessage("No super method found.");
+    return;
+  }
+
+  if (locations.length === 1) {
+    const location = toVsCodeLocation(locations[0] as any);
+    await vscode.window.showTextDocument(location.uri, {
+      selection: location.range,
+    });
+    return;
+  }
+
+  const picks = locations.map((loc, index) => {
+    const location = toVsCodeLocation(loc as any);
+    return {
+      label: `${location.uri.fsPath}:${location.range.start.line + 1}`,
+      location,
+      index,
+    };
+  });
+  const choice = await vscode.window.showQuickPick(picks, {
+    title: "Select super method",
+  });
+  if (!choice) {
+    return;
+  }
+  await vscode.window.showTextDocument(choice.location.uri, {
+    selection: choice.location.range,
+  });
+}
+
+function openUsage(usage: UsageItem) {
+  const location = toVsCodeLocation(usage.location);
+  vscode.window.showTextDocument(location.uri, {
+    selection: location.range,
+  });
+}
+
+async function pickUsageFilters(): Promise<string[]> {
+  const picks = await vscode.window.showQuickPick(
+    [
+      { label: "Method Calls", value: "methodCall" },
+      { label: "Constructor Calls", value: "constructorCall" },
+      { label: "Field Access", value: "fieldAccess" },
+      { label: "Property Access", value: "propertyAccess" },
+      { label: "Variable References", value: "variableReference" },
+      { label: "Type References", value: "typeReference" },
+      { label: "Declarations", value: "declaration" },
+      { label: "Other References", value: "reference" },
+    ],
+    {
+      canPickMany: true,
+      placeHolder: "Filter usages by type (leave empty for all)",
+    }
+  );
+
+  if (!picks || picks.length === 0) {
+    return [];
+  }
+  return picks.map((pick) => pick.value);
 }
 
 function startLanguageServer() {
