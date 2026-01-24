@@ -914,17 +914,36 @@ public class GroovyASTUtils {
             return null;
         }
         for (MethodNode candidate : owner.getMethods(methodName)) {
-            Parameter[] params = candidate.getParameters();
-            for (Parameter param : params) {
-                if (param.getType() != null && "groovy.lang.Closure".equals(param.getType().getName())) {
-                    ClassNode resolved = resolveDslMarkerOwner(param);
-                    if (resolved != null) {
-                        return resolved;
-                    }
-                }
+            ClassNode resolved = resolveDslMarkerTypeFromMethod(candidate);
+            if (resolved != null) {
+                return resolved;
             }
         }
         return null;
+    }
+
+    private static ClassNode resolveDslMarkerTypeFromMethod(MethodNode method) {
+        if (method == null) {
+            return null;
+        }
+        boolean methodMarked = hasAnnotation(method, DSL_MARKER_ANNOTATIONS);
+        Parameter[] params = method.getParameters();
+        ClassNode fallback = null;
+        for (Parameter param : params) {
+            ClassNode type = param.getType();
+            boolean isClosure = type != null && "groovy.lang.Closure".equals(type.getName());
+            if (isClosure) {
+                continue;
+            }
+            ClassNode resolved = resolveDslMarkerOwner(param);
+            if (resolved != null) {
+                return resolved;
+            }
+            if (methodMarked && fallback == null && type != null) {
+                fallback = type;
+            }
+        }
+        return fallback;
     }
 
     private static ClassNode findDslMarkerClassType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
