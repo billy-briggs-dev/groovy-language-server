@@ -13,3 +13,7 @@ To build from the command line, run the following command:
 ```
 
 The extension will be created in the _build_ folder.
+
+## Debugging
+
+The sample extension registers a minimal Debug Adapter Protocol implementation for Groovy. It provides placeholder breakpoint, variable inspection, and expression evaluation support for editor integrations that expect a DAP adapter.

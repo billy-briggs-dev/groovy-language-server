@@ -470,7 +470,7 @@ public class GroovyASTUtils {
                 methodNode = resolveMethodByName(expression, astVisitor);
             }
             if (methodNode != null) {
-                return inferReturnType(methodNode, astVisitor);
+                return inferReturnTypeFromCall(expression, methodNode, astVisitor);
             }
             return expression.getType();
         } else if (node instanceof PropertyExpression) {
@@ -571,6 +571,118 @@ public class GroovyASTUtils {
             return commonType;
         }
         return declaredType != null ? declaredType : ClassHelper.OBJECT_TYPE;
+    }
+
+    private static ClassNode inferReturnTypeFromCall(MethodCallExpression call, MethodNode method,
+            ASTNodeVisitor astVisitor) {
+        ClassNode baseReturnType = inferReturnType(method, astVisitor);
+        if (baseReturnType == null) {
+            return null;
+        }
+        if (!baseReturnType.isGenericsPlaceHolder() && !baseReturnType.isUsingGenerics()) {
+            return baseReturnType;
+        }
+        java.util.Map<String, ClassNode> genericsMap = resolveGenericsFromCallArguments(call, method, astVisitor);
+        if (genericsMap.isEmpty()) {
+            return baseReturnType;
+        }
+        return substituteGenerics(baseReturnType, genericsMap);
+    }
+
+    private static java.util.Map<String, ClassNode> resolveGenericsFromCallArguments(MethodCallExpression call,
+            MethodNode method, ASTNodeVisitor astVisitor) {
+        java.util.Map<String, ClassNode> mapping = new java.util.HashMap<>();
+        if (call == null || method == null || !(call.getArguments() instanceof ArgumentListExpression)) {
+            return mapping;
+        }
+        ClassNode ownerType = getTypeOfNode(call.getObjectExpression(), astVisitor);
+        if (ownerType != null && method.getDeclaringClass() != null) {
+            GenericsType[] ownerGenerics = ownerType.getGenericsTypes();
+            GenericsType[] classGenerics = method.getDeclaringClass().getGenericsTypes();
+            if (ownerGenerics != null && classGenerics != null
+                    && ownerGenerics.length == classGenerics.length) {
+                for (int i = 0; i < ownerGenerics.length; i++) {
+                    ClassNode classGenericType = classGenerics[i].getType();
+                    ClassNode ownerGenericType = ownerGenerics[i].getType();
+                    collectGenericsMapping(classGenericType, ownerGenericType, mapping);
+                }
+            }
+        }
+        ArgumentListExpression args = (ArgumentListExpression) call.getArguments();
+        List<Expression> expressions = args.getExpressions();
+        Parameter[] parameters = method.getParameters();
+        int count = Math.min(parameters.length, expressions.size());
+        for (int i = 0; i < count; i++) {
+            Parameter param = parameters[i];
+            Expression argExpr = expressions.get(i);
+            ClassNode argType = getTypeOfNode(argExpr, astVisitor);
+            if (argType == null) {
+                continue;
+            }
+            ClassNode paramType = param != null ? param.getType() : null;
+            if (paramType == null) {
+                continue;
+            }
+            collectGenericsMapping(paramType, argType, mapping);
+        }
+        return mapping;
+    }
+
+    private static void collectGenericsMapping(ClassNode paramType, ClassNode argType,
+            java.util.Map<String, ClassNode> mapping) {
+        if (paramType == null || argType == null) {
+            return;
+        }
+        if (paramType.isGenericsPlaceHolder()) {
+            String name = paramType.getUnresolvedName();
+            if (name == null || name.isBlank()) {
+                name = paramType.getName();
+            }
+            if (name != null && !name.isBlank()) {
+                mapping.putIfAbsent(name, argType);
+            }
+            return;
+        }
+        GenericsType[] paramGenerics = paramType.getGenericsTypes();
+        GenericsType[] argGenerics = argType.getGenericsTypes();
+        if (paramGenerics != null && argGenerics != null
+                && paramGenerics.length == argGenerics.length) {
+            for (int i = 0; i < paramGenerics.length; i++) {
+                ClassNode paramGenericType = paramGenerics[i].getType();
+                ClassNode argGenericType = argGenerics[i].getType();
+                collectGenericsMapping(paramGenericType, argGenericType, mapping);
+            }
+        }
+    }
+
+    private static ClassNode substituteGenerics(ClassNode type, java.util.Map<String, ClassNode> mapping) {
+        if (type == null || mapping == null || mapping.isEmpty()) {
+            return type;
+        }
+        if (type.isGenericsPlaceHolder()) {
+            String name = type.getUnresolvedName();
+            if (name == null || name.isBlank()) {
+                name = type.getName();
+            }
+            ClassNode mapped = name != null ? mapping.get(name) : null;
+            return mapped != null ? mapped : type;
+        }
+        if (!type.isUsingGenerics()) {
+            return type;
+        }
+        ClassNode resolved = type.getPlainNodeReference();
+        GenericsType[] generics = type.getGenericsTypes();
+        if (generics == null || generics.length == 0) {
+            return resolved;
+        }
+        GenericsType[] resolvedGenerics = new GenericsType[generics.length];
+        for (int i = 0; i < generics.length; i++) {
+            ClassNode genericType = generics[i].getType();
+            ClassNode substituted = substituteGenerics(genericType, mapping);
+            resolvedGenerics[i] = new GenericsType(substituted);
+        }
+        resolved.setGenericsTypes(resolvedGenerics);
+        return resolved;
     }
 
     private static boolean collectReturnTypes(Statement statement, List<ClassNode> returnTypes,
