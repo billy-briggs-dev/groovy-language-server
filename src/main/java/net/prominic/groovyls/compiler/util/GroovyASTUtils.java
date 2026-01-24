@@ -42,6 +42,7 @@ import org.codehaus.groovy.ast.expr.ConstantExpression;
 import org.codehaus.groovy.ast.expr.ConstructorCallExpression;
 import org.codehaus.groovy.ast.expr.DeclarationExpression;
 import org.codehaus.groovy.ast.expr.Expression;
+import org.codehaus.groovy.ast.expr.GStringExpression;
 import org.codehaus.groovy.ast.expr.MethodCall;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
@@ -301,6 +302,8 @@ public class GroovyASTUtils {
             if (binaryExpr.getOperation().getText().equals("[") && leftExpr.getType().isArray()) {
                 return leftExpr.getType().getComponentType();
             }
+        } else if (node instanceof GStringExpression) {
+            return ClassHelper.STRING_TYPE;
         } else if (node instanceof ClassExpression) {
             ClassExpression expression = (ClassExpression) node;
             // This means it's an expression like this: SomeClass.someProp
