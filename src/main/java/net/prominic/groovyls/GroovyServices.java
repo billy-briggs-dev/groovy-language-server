@@ -161,6 +161,8 @@ import net.prominic.groovyls.util.GradleClasspathResolver;
 import net.prominic.groovyls.util.GradleProjectDetector;
 import net.prominic.groovyls.util.GradleProjectInfo;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
+import net.prominic.groovyls.util.MavenProjectDetector;
+import net.prominic.groovyls.util.MavenProjectInfo;
 import net.prominic.groovyls.util.MavenDependencyResolver;
 import net.prominic.lsp.utils.Positions;
 
@@ -200,6 +202,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private List<String> gradleClasspathScopes = new ArrayList<>();
 	private boolean gradleIncludeBuildscript = false;
 	private List<String> mavenClasspathList = Collections.emptyList();
+	private MavenProjectInfo mavenProjectInfo;
 	private List<String> excludePatterns = new ArrayList<>();
 	private List<String> sourceRoots = new ArrayList<>();
 	private List<String> mavenRepositories = new ArrayList<>();
@@ -283,6 +286,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	@Override
 	public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
 		detectGradleProject();
+		scheduleMavenIndexing();
 		synchronized (compileOperationLock) {
 			boolean isSameUnit = createOrUpdateCompilationUnit();
 			Set<URI> urisWithChanges = params.getChanges().stream().map(fileEvent -> URI.create(fileEvent.getUri()))
@@ -872,13 +876,21 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	private void scheduleMavenIndexing() {
 		final int generation = mavenIndexGeneration.incrementAndGet();
-		List<String> deps = new ArrayList<>(mavenDependencies);
-		List<String> repos = new ArrayList<>(mavenRepositories);
+		MavenProjectInfo detected = MavenProjectDetector.detect(workspaceRoot);
+		List<String> deps = new ArrayList<>();
+		List<String> repos = new ArrayList<>();
+		if (detected != null) {
+			deps.addAll(detected.getDependencies());
+			repos.addAll(detected.getRepositories());
+		}
+		deps.addAll(mavenDependencies);
+		repos.addAll(mavenRepositories);
 		indexingScheduler.execute(() -> {
 			List<String> resolved = MavenDependencyResolver.resolve(deps, repos);
 			if (mavenIndexGeneration.get() != generation) {
 				return;
 			}
+			mavenProjectInfo = detected;
 			mavenClasspathList = resolved;
 			applyEffectiveClasspathAsync();
 		});

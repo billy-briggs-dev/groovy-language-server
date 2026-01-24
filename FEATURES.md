@@ -38,7 +38,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - [x] Buildscript classpath support
   - [x] Configuration-specific classpaths (compile, runtime, test)
   
-- [ ] **Maven support**
+- [x] **Maven support**
   - Auto-detect Maven projects
   - Parse `pom.xml` for dependencies
   - Multi-module Maven projects
