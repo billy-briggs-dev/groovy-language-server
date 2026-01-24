@@ -54,7 +54,10 @@ import org.codehaus.groovy.ast.expr.MethodCall;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
 import org.codehaus.groovy.ast.expr.VariableExpression;
+import org.codehaus.groovy.ast.stmt.BlockStatement;
 import org.codehaus.groovy.ast.stmt.ExpressionStatement;
+import org.codehaus.groovy.ast.stmt.ReturnStatement;
+import org.codehaus.groovy.ast.stmt.Statement;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 
@@ -192,10 +195,15 @@ public class GroovyASTUtils {
         }
         if (definitionNode instanceof MethodNode) {
             MethodNode method = (MethodNode) definitionNode;
-            return tryToResolveOriginalClassNode(method.getReturnType(), true, astVisitor);
+            ClassNode returnType = inferReturnType(method, astVisitor);
+            return tryToResolveOriginalClassNode(returnType, true, astVisitor);
         } else if (definitionNode instanceof Variable) {
             Variable variable = (Variable) definitionNode;
-            return tryToResolveOriginalClassNode(variable.getOriginType(), true, astVisitor);
+            ClassNode variableType = variable.getOriginType();
+            if (variableType == null || variableType == ClassHelper.DYNAMIC_TYPE) {
+                variableType = getTypeOfNode(definitionNode, astVisitor);
+            }
+            return tryToResolveOriginalClassNode(variableType, true, astVisitor);
         }
         return null;
     }
@@ -453,8 +461,11 @@ public class GroovyASTUtils {
         } else if (node instanceof MethodCallExpression) {
             MethodCallExpression expression = (MethodCallExpression) node;
             MethodNode methodNode = GroovyASTUtils.getMethodFromCallExpression(expression, astVisitor);
+            if (methodNode == null) {
+                methodNode = resolveMethodByName(expression, astVisitor);
+            }
             if (methodNode != null) {
-                return methodNode.getReturnType();
+                return inferReturnType(methodNode, astVisitor);
             }
             return expression.getType();
         } else if (node instanceof PropertyExpression) {
@@ -480,7 +491,7 @@ public class GroovyASTUtils {
                 if (delegatesTo != null) {
                     return delegatesTo;
                 }
-            } else if (var.isDynamicTyped()) {
+            } else if (var.isDynamicTyped() || var.getType() == ClassHelper.OBJECT_TYPE) {
                 ASTNode defNode = GroovyASTUtils.getDefinition(node, false, astVisitor);
                 if (defNode instanceof Variable) {
                     Variable defVar = (Variable) defNode;
@@ -491,6 +502,17 @@ public class GroovyASTUtils {
                         if (declNode instanceof DeclarationExpression) {
                             DeclarationExpression decl = (DeclarationExpression) declNode;
                             return getTypeOfNode(decl.getRightExpression(), astVisitor);
+                        }
+                    }
+                } else if (defNode == null && var.getName() != null) {
+                    String varName = var.getName();
+                    for (ASTNode candidate : astVisitor.getNodes()) {
+                        if (candidate instanceof DeclarationExpression) {
+                            DeclarationExpression decl = (DeclarationExpression) candidate;
+                            if (decl.getVariableExpression() != null
+                                    && varName.equals(decl.getVariableExpression().getName())) {
+                                return getTypeOfNode(decl.getRightExpression(), astVisitor);
+                            }
                         }
                     }
                 }
@@ -507,6 +529,98 @@ public class GroovyASTUtils {
             return expression.getType();
         }
         return null;
+    }
+
+    private static ClassNode inferReturnType(MethodNode method, ASTNodeVisitor astVisitor) {
+        if (method == null) {
+            return null;
+        }
+        ClassNode declaredType = method.getReturnType();
+        boolean dynamicReturnType = method.isDynamicReturnType();
+        if (!dynamicReturnType && declaredType != null
+                && declaredType != ClassHelper.DYNAMIC_TYPE
+                && declaredType != ClassHelper.OBJECT_TYPE) {
+            return declaredType;
+        }
+        Statement code = method.getCode();
+        if (code == null) {
+            return declaredType != null ? declaredType : ClassHelper.OBJECT_TYPE;
+        }
+        List<ClassNode> returnTypes = new ArrayList<>();
+        collectReturnTypes(code, returnTypes, astVisitor);
+        ClassNode commonType = mergeReturnTypes(returnTypes);
+        if (commonType != null) {
+            return commonType;
+        }
+        return declaredType != null ? declaredType : ClassHelper.OBJECT_TYPE;
+    }
+
+    private static boolean collectReturnTypes(Statement statement, List<ClassNode> returnTypes,
+            ASTNodeVisitor astVisitor) {
+        if (statement == null) {
+            return false;
+        }
+        if (statement instanceof ReturnStatement) {
+            ReturnStatement returnStatement = (ReturnStatement) statement;
+            Expression expression = returnStatement.getExpression();
+            if (expression != null) {
+                ClassNode returnType = getTypeOfNode(expression, astVisitor);
+                if (returnType != null) {
+                    returnTypes.add(returnType);
+                }
+            }
+            return true;
+        }
+        if (statement instanceof BlockStatement) {
+            BlockStatement block = (BlockStatement) statement;
+            List<Statement> statements = block.getStatements();
+            boolean hasExplicitReturn = false;
+            for (Statement child : statements) {
+                if (collectReturnTypes(child, returnTypes, astVisitor)) {
+                    hasExplicitReturn = true;
+                }
+            }
+            if (!hasExplicitReturn && !statements.isEmpty()) {
+                Statement last = statements.get(statements.size() - 1);
+                if (last instanceof ExpressionStatement) {
+                    Expression expression = ((ExpressionStatement) last).getExpression();
+                    ClassNode returnType = getTypeOfNode(expression, astVisitor);
+                    if (returnType != null) {
+                        returnTypes.add(returnType);
+                    }
+                }
+            }
+            return hasExplicitReturn;
+        }
+        if (statement instanceof ExpressionStatement) {
+            Expression expression = ((ExpressionStatement) statement).getExpression();
+            ClassNode returnType = getTypeOfNode(expression, astVisitor);
+            if (returnType != null) {
+                returnTypes.add(returnType);
+            }
+            return false;
+        }
+        return false;
+    }
+
+    private static ClassNode mergeReturnTypes(List<ClassNode> returnTypes) {
+        if (returnTypes == null || returnTypes.isEmpty()) {
+            return null;
+        }
+        ClassNode commonType = null;
+        for (ClassNode returnType : returnTypes) {
+            if (returnType == null) {
+                continue;
+            }
+            if (commonType == null) {
+                commonType = returnType;
+                continue;
+            }
+            if (!commonType.equals(returnType)) {
+                return ClassHelper.OBJECT_TYPE;
+            }
+        }
+        return commonType != null ? commonType : ClassHelper.OBJECT_TYPE;
     }
 
     private static ClassNode inferCommonType(List<Expression> expressions, ASTNodeVisitor astVisitor) {
@@ -608,6 +722,12 @@ public class GroovyASTUtils {
             String name = ((VariableExpression) call.getObjectExpression()).getName();
             owner = findClassNodeByName(name, astVisitor);
         }
+        if (owner == null && call.isImplicitThis()) {
+            ASTNode enclosingClass = getEnclosingNodeOfType(call, ClassNode.class, astVisitor);
+            if (enclosingClass instanceof ClassNode) {
+                owner = (ClassNode) enclosingClass;
+            }
+        }
         if (owner == null) {
             return null;
         }
@@ -680,7 +800,22 @@ public class GroovyASTUtils {
         if (node instanceof MethodCallExpression) {
             MethodCallExpression methodCallExpr = (MethodCallExpression) node;
             ClassNode leftType = getTypeOfNode(methodCallExpr.getObjectExpression(), astVisitor);
+            if (leftType == null && methodCallExpr.getObjectExpression() instanceof VariableExpression) {
+                VariableExpression varExpr = (VariableExpression) methodCallExpr.getObjectExpression();
+                if ("this".equals(varExpr.getName())) {
+                    ASTNode enclosingClass = getEnclosingNodeOfType(methodCallExpr, ClassNode.class, astVisitor);
+                    if (enclosingClass instanceof ClassNode) {
+                        leftType = (ClassNode) enclosingClass;
+                    }
+                }
+            }
             if (leftType == null && methodCallExpr.isImplicitThis()) {
+                ASTNode enclosingClass = getEnclosingNodeOfType(methodCallExpr, ClassNode.class, astVisitor);
+                if (enclosingClass instanceof ClassNode) {
+                    leftType = (ClassNode) enclosingClass;
+                }
+            }
+            if (leftType == null) {
                 ASTNode enclosingClass = getEnclosingNodeOfType(methodCallExpr, ClassNode.class, astVisitor);
                 if (enclosingClass instanceof ClassNode) {
                     leftType = (ClassNode) enclosingClass;

@@ -45,6 +45,7 @@ import org.codehaus.groovy.ast.expr.BinaryExpression;
 import org.codehaus.groovy.ast.expr.ClassExpression;
 import org.codehaus.groovy.ast.expr.ClosureExpression;
 import org.codehaus.groovy.ast.expr.ConstructorCallExpression;
+import org.codehaus.groovy.ast.expr.DeclarationExpression;
 import org.codehaus.groovy.ast.expr.Expression;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
@@ -138,6 +139,14 @@ public class CompletionProvider {
 			if (fallback != null) {
 				populateItemsFromPropertyExpression(fallback, position, items);
 			}
+		}
+
+		if (items.isEmpty() && offsetNode instanceof MethodCallExpression && isCallResultMemberAccess(position)) {
+			String prefix = getMemberNameFromSource(position);
+			if (prefix == null) {
+				prefix = "";
+			}
+			populateItemsFromExpression((MethodCallExpression) offsetNode, prefix, items);
 		}
 
 		if (items.isEmpty() && hasMemberAccessInSource(position)) {
@@ -429,13 +438,13 @@ public class CompletionProvider {
 		populateItemsFromMethods(methods, memberNamePrefix, existingNames, items);
 
 		ClassNode leftType = GroovyASTUtils.getTypeOfNode(leftSide, ast);
-		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE) {
+		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE) {
 			ClassNode fallback = leftSide.getType();
 			if (fallback != null && fallback != ClassHelper.DYNAMIC_TYPE) {
 				leftType = fallback;
 			}
 		}
-		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE) {
+		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE) {
 			ASTNode def = GroovyASTUtils.getDefinition(leftSide, false, ast);
 			if (def instanceof org.codehaus.groovy.ast.Variable) {
 				org.codehaus.groovy.ast.Variable variable = (org.codehaus.groovy.ast.Variable) def;
@@ -448,10 +457,25 @@ public class CompletionProvider {
 						leftType = varType;
 					}
 				}
-				if (leftType == null && def instanceof VariableExpression) {
+				if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+						|| leftType == ClassHelper.OBJECT_TYPE) && def instanceof VariableExpression) {
 					VariableExpression varExpr = (VariableExpression) def;
 					if (varExpr.hasInitialExpression()) {
 						leftType = GroovyASTUtils.getTypeOfNode(varExpr.getInitialExpression(), ast);
+					}
+				}
+			}
+			if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE)
+					&& leftSide instanceof VariableExpression) {
+				String varName = ((VariableExpression) leftSide).getName();
+				for (ASTNode candidate : ast.getNodes()) {
+					if (candidate instanceof DeclarationExpression) {
+						DeclarationExpression decl = (DeclarationExpression) candidate;
+						if (decl.getVariableExpression() != null
+								&& varName.equals(decl.getVariableExpression().getName())) {
+							leftType = GroovyASTUtils.getTypeOfNode(decl.getRightExpression(), ast);
+							break;
+						}
 					}
 				}
 			}
@@ -795,6 +819,37 @@ public class CompletionProvider {
 		}
 		int lastDot = line.lastIndexOf('.', Math.max(0, column - 1));
 		return lastDot != -1;
+	}
+
+	private boolean isCallResultMemberAccess(Position position) {
+		if (files == null || completionUri == null) {
+			return false;
+		}
+		String text = files.getContents(completionUri);
+		if (text == null) {
+			return false;
+		}
+		int offset = Positions.getOffset(text, position);
+		int lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1));
+		lineStart = lineStart == -1 ? 0 : lineStart + 1;
+		int lineEnd = text.indexOf('\n', offset);
+		if (lineEnd == -1) {
+			lineEnd = text.length();
+		}
+		String line = text.substring(lineStart, lineEnd);
+		int column = position.getCharacter();
+		if (column > line.length()) {
+			column = line.length();
+		}
+		int lastDot = line.lastIndexOf('.', Math.max(0, column - 1));
+		if (lastDot == -1) {
+			return false;
+		}
+		int i = lastDot - 1;
+		while (i >= 0 && Character.isWhitespace(line.charAt(i))) {
+			i--;
+		}
+		return i >= 0 && line.charAt(i) == ')';
 	}
 
 	private void populateItemsFromSourceMetaClassAssignments(String memberNamePrefix, List<CompletionItem> items) {

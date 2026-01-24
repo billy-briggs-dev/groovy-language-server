@@ -57,7 +57,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   
 - [ ] **Type inference**
   - Local variable type inference
-  - Method return type inference
+  - [x] Method return type inference
   - Generic type parameter inference
   - [x] Collection literal type inference
   
