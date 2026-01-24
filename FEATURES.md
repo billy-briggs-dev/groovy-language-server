@@ -7,7 +7,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 ## 🔴 Critical Features (Must Have)
 
 ### 1. **Dynamic Language Support**
-- [ ] **MetaClass method detection** (#103)
+- [x] **MetaClass method detection** (#103)
   - Track methods added via `SomeClass.metaClass.methodName = { }`
   - Support `methodMissing` and `propertyMissing`
   - Runtime method resolution
@@ -31,12 +31,12 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 
 ### 2. **Build System Integration**
 - [ ] **Full Gradle support** (#26, #94, #106)
-  - Auto-detect Gradle projects
-  - Extract classpath from `build.gradle` / `build.gradle.kts`
-  - Multi-module project support
-  - Transitive dependency resolution
-  - Buildscript classpath support
-  - Configuration-specific classpaths (compile, runtime, test)
+  - [x] Auto-detect Gradle projects
+  - [x] Extract classpath from `build.gradle` / `build.gradle.kts`
+  - [x] Multi-module project support
+  - [ ] Transitive dependency resolution
+  - [ ] Buildscript classpath support
+  - [ ] Configuration-specific classpaths (compile, runtime, test)
   
 - [ ] **Maven support**
   - Auto-detect Maven projects
@@ -73,7 +73,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - Unused methods/fields
 
 ### 4. **Error Handling**
-- [ ] **Isolate syntax errors per file** (#54)
+- [x] **Isolate syntax errors per file** (#54)
   - One file's errors shouldn't break LSP for entire workspace
   - Graceful degradation
   
@@ -84,7 +84,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 ## 🟡 High Priority Features
 
 ### 5. **Code Completion**
-- [ ] **Keyword completion** (#21)
+- [x] **Keyword completion** (#21)
   - `class`, `interface`, `enum`
   - `public`, `private`, `protected`
   - `static`, `final`, `abstract`
@@ -152,7 +152,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 - [ ] **External documentation links**
 
 ### 10. **Performance** (#105)
-- [ ] **Debounce diagnostics** (#105)
+- [x] **Debounce diagnostics** (#105)
   - Don't recompile on every keystroke
   - Batch changes
   
@@ -331,8 +331,8 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 | **Code Completion** | ✅✅✅ | ⚠️ | Large |
 | **Navigation** | ✅✅✅ | ⚠️ | Medium |
 | **Refactoring** | ✅✅✅ | ⚠️ | Large |
-| **Build Tools** | ✅✅✅ | ❌ | Critical |
-| **Dynamic Features** | ✅✅✅ | ❌ | Critical |
+| **Build Tools** | ✅✅✅ | ⚠️ | Medium |
+| **Dynamic Features** | ✅✅✅ | ⚠️ | Large |
 | **Semantic Analysis** | ✅✅✅ | ⚠️ | Large |
 | **Formatting** | ✅✅ | ❌ | Medium |
 | **Testing** | ✅✅✅ | ❌ | Large |
@@ -346,13 +346,13 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 ## 🎯 Recommended Implementation Order
 
 ### Phase 1: Foundation (3-6 months)
-1. Fix critical bugs (#54, #105)
-2. Full Gradle support (#26)
-3. Keyword completion (#21)
-4. Better error isolation
+1. Fix critical bugs (#54, #105) — done
+2. Full Gradle support (#26) — in progress
+3. Keyword completion (#21) — done
+4. Better error isolation — done
 
 ### Phase 2: Core Features (6-12 months)
-5. MetaClass support (#103)
+5. MetaClass support (#103) — done
 6. Code formatting (#18)
 7. Semantic error detection (#95)
 8. AST transformations
