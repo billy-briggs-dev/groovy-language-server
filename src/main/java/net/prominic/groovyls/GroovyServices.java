@@ -755,20 +755,27 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			importsByUri.computeIfAbsent(uri, key -> new ArrayList<>()).add(importNode);
 		}
 		Map<String, Pattern> patternCache = new HashMap<>();
-		for (Map.Entry<URI, List<ImportNode>> entry : importsByUri.entrySet()) {
-			URI uri = entry.getKey();
-			List<ImportNode> importNodes = entry.getValue();
+		Set<URI> urisToScan = new HashSet<>(importsByUri.keySet());
+		urisToScan.addAll(fileContentsTracker.getOpenURIs());
+		for (URI uri : urisToScan) {
+			List<ImportNode> importNodes = importsByUri.getOrDefault(uri, Collections.emptyList());
 			String contents = fileContentsTracker.getContents(uri);
-			if (contents == null || importNodes.isEmpty()) {
+			if (contents == null) {
+				continue;
+			}
+			if (importNodes.isEmpty()) {
+				collectUnusedImportsFromSource(uri, contents, diagnosticsByFile, patternCache);
 				continue;
 			}
 			Set<Integer> importLines = new HashSet<>();
 			for (ImportNode importNode : importNodes) {
 				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
 				if (range == null) {
-					continue;
+					range = findImportRange(contents, importNode);
 				}
-				importLines.add(range.getStart().getLine());
+				if (range != null) {
+					importLines.add(range.getStart().getLine());
+				}
 			}
 			String searchContent = removeImportLines(contents, importLines);
 			for (ImportNode importNode : importNodes) {
@@ -785,7 +792,10 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				}
 				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
 				if (range == null) {
-					continue;
+					range = findImportRange(contents, importNode);
+				}
+				if (range == null) {
+					range = new Range(new Position(0, 0), new Position(0, 0));
 				}
 				if (isImportNameUsed(searchContent, importName, importType, patternCache)) {
 					continue;
@@ -796,6 +806,93 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				diagnostic.setMessage("Unused import: " + importName);
 				diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
 			}
+		}
+	}
+
+	private void collectUnusedImportsFromSource(URI uri, String contents,
+			Map<URI, List<Diagnostic>> diagnosticsByFile, Map<String, Pattern> patternCache) {
+		if (contents == null) {
+			return;
+		}
+		List<ImportInfo> imports = parseImportInfos(contents);
+		if (imports.isEmpty()) {
+			return;
+		}
+		Set<Integer> importLines = new HashSet<>();
+		for (ImportInfo info : imports) {
+			importLines.add(info.line);
+		}
+		String searchContent = removeImportLines(contents, importLines);
+		for (ImportInfo info : imports) {
+			if (isImportNameUsedText(searchContent, info.importName, info.fullName, patternCache)) {
+				continue;
+			}
+			Diagnostic diagnostic = new Diagnostic();
+			diagnostic.setRange(new Range(new Position(info.line, 0), new Position(info.line, 0)));
+			diagnostic.setSeverity(DiagnosticSeverity.Warning);
+			diagnostic.setMessage("Unused import: " + info.importName);
+			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
+		}
+	}
+
+	private List<ImportInfo> parseImportInfos(String contents) {
+		List<ImportInfo> results = new ArrayList<>();
+		String[] lines = contents.split("\\R", -1);
+		for (int i = 0; i < lines.length; i++) {
+			String line = lines[i].trim();
+			if (!line.startsWith("import ") || line.startsWith("import static ")) {
+				continue;
+			}
+			String remainder = line.substring("import ".length()).trim();
+			if (remainder.endsWith(".*")) {
+				continue;
+			}
+			String importName = null;
+			String fullName = remainder;
+			int asIndex = remainder.indexOf(" as ");
+			if (asIndex > -1) {
+				fullName = remainder.substring(0, asIndex).trim();
+				importName = remainder.substring(asIndex + 4).trim();
+			}
+			if (importName == null || importName.isBlank()) {
+				int lastDot = fullName.lastIndexOf('.');
+				importName = lastDot > -1 ? fullName.substring(lastDot + 1) : fullName;
+			}
+			if (importName == null || importName.isBlank()) {
+				continue;
+			}
+			results.add(new ImportInfo(importName, fullName, i));
+		}
+		return results;
+	}
+
+	private boolean isImportNameUsedText(String contents, String importName, String fullName,
+			Map<String, Pattern> patternCache) {
+		if (contents == null || importName == null || importName.isBlank()) {
+			return false;
+		}
+		Pattern pattern = patternCache.computeIfAbsent(importName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
+		if (pattern.matcher(contents).find()) {
+			return true;
+		}
+		if (fullName == null || fullName.isBlank() || fullName.equals(importName)) {
+			return false;
+		}
+		Pattern qualifiedPattern = patternCache.computeIfAbsent(fullName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
+		return qualifiedPattern.matcher(contents).find();
+	}
+
+	private static class ImportInfo {
+		final String importName;
+		final String fullName;
+		final int line;
+
+		ImportInfo(String importName, String fullName, int line) {
+			this.importName = importName;
+			this.fullName = fullName;
+			this.line = line;
 		}
 	}
 
@@ -836,6 +933,28 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		Pattern qualifiedPattern = patternCache.computeIfAbsent(fullName,
 				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
 		return qualifiedPattern.matcher(contents).find();
+	}
+
+	private Range findImportRange(String contents, ImportNode importNode) {
+		if (contents == null || importNode == null) {
+			return null;
+		}
+		ClassNode type = importNode.getType();
+		String fullName = type != null ? type.getName() : null;
+		String alias = importNode.getAlias();
+		String target = fullName != null ? fullName : alias;
+		if (target == null || target.isBlank()) {
+			return null;
+		}
+		String[] lines = contents.split("\\R", -1);
+		String importText = "import " + target;
+		for (int i = 0; i < lines.length; i++) {
+			String line = lines[i];
+			if (line.contains(importText)) {
+				return new Range(new Position(i, 0), new Position(i, line.length()));
+			}
+		}
+		return null;
 	}
 
 	private boolean isClassName(String name, ASTNodeVisitor visitor) {

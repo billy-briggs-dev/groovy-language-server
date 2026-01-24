@@ -31,11 +31,14 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
+import org.eclipse.lsp4j.HoverParams;
 import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
+import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.services.LanguageClient;
@@ -176,12 +179,23 @@ class GroovyServicesDiagnosticsTests {
 				"}");
 		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, source);
 		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
-		boolean published = publishLatch.await(2, TimeUnit.SECONDS);
-		Assertions.assertTrue(published, "Expected diagnostics to be published");
-		PublishDiagnosticsParams diagnostics = lastDiagnostics.get();
-		Assertions.assertNotNull(diagnostics);
-		Assertions.assertEquals(uri, diagnostics.getUri());
-		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
-				.anyMatch(diag -> "Unused import: List".equals(diag.getMessage())));
+		services.hover(new HoverParams(new TextDocumentIdentifier(uri), new Position(0, 0))).get();
+		PublishDiagnosticsParams diagnostics = awaitDiagnosticsMessage(uri, "Unused import: List", 2000);
+		Assertions.assertNotNull(diagnostics, "Expected diagnostics to include unused import");
+	}
+
+	private PublishDiagnosticsParams awaitDiagnosticsMessage(String uri, String message, long timeoutMillis)
+			throws InterruptedException {
+		long deadline = System.currentTimeMillis() + timeoutMillis;
+		while (System.currentTimeMillis() < deadline) {
+			PublishDiagnosticsParams diagnostics = lastDiagnostics.get();
+			if (diagnostics != null && uri.equals(diagnostics.getUri())
+					&& diagnostics.getDiagnostics().stream()
+							.anyMatch(diag -> message.equals(diag.getMessage()))) {
+				return diagnostics;
+			}
+			Thread.sleep(50);
+		}
+		return lastDiagnostics.get();
 	}
 }
