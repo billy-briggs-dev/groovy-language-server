@@ -38,8 +38,8 @@ public class FormattingProvider {
 	private static final String[] OPERATORS = new String[] { ">>>=", "<<=", ">>=", ">>>", "<<", ">>", "==", "!=",
 			"<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "->", "=", "+", "-",
 			"*", "/", "%", "<", ">", "&", "|", "^", "?", ":" };
-    private static final String LINE_BREAK = "\n";
-    private static final Set<String> NO_SPACE_OPERATORS = Set.of("++", "--");
+	private static final String LINE_BREAK = "\n";
+	private static final Set<String> NO_SPACE_OPERATORS = Set.of("++", "--");
 
 	private final FileContentsTracker files;
 	private final FormattingSettings settings;
@@ -49,12 +49,12 @@ public class FormattingProvider {
 		this.settings = settings;
 	}
 
-	public CompletableFuture<List<TextEdit>> provideDocumentFormatting(TextDocumentIdentifier textDocument) {
+	public CompletableFuture<List<? extends TextEdit>> provideDocumentFormatting(TextDocumentIdentifier textDocument) {
 		List<TextEdit> edits = formatDocument(textDocument, null);
 		return CompletableFuture.completedFuture(edits);
 	}
 
-	public CompletableFuture<List<TextEdit>> provideRangeFormatting(DocumentRangeFormattingParams params) {
+	public CompletableFuture<List<? extends TextEdit>> provideRangeFormatting(DocumentRangeFormattingParams params) {
 		List<TextEdit> edits = formatDocument(params.getTextDocument(), params.getRange());
 		return CompletableFuture.completedFuture(edits);
 	}
@@ -231,6 +231,12 @@ public class FormattingProvider {
 		while (index < line.length()) {
 			char character = line.charAt(index);
 			if (character == '{') {
+				if (builder.length() > 0 && !Character.isWhitespace(builder.charAt(builder.length() - 1))) {
+					char previous = builder.charAt(builder.length() - 1);
+					if (previous != '(' && previous != '[' && previous != '{') {
+						builder.append(' ');
+					}
+				}
 				builder.append('{');
 				index++;
 				while (index < line.length() && Character.isWhitespace(line.charAt(index))) {
@@ -243,7 +249,8 @@ public class FormattingProvider {
 			}
 			if (character == '}') {
 				trimTrailingWhitespace(builder);
-				if (settings.isSpaceInsideBraces() && builder.length() > 0 && builder.charAt(builder.length() - 1) != '{') {
+				if (settings.isSpaceInsideBraces() && builder.length() > 0
+						&& builder.charAt(builder.length() - 1) != '{') {
 					builder.append(' ');
 				}
 				builder.append('}');
