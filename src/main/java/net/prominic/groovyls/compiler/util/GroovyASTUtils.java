@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.codehaus.groovy.ast.ASTNode;
@@ -853,6 +855,19 @@ public class GroovyASTUtils {
     }
 
     private static ClassNode resolveDslMarkerOwner(AnnotatedNode node) {
+        return resolveDslMarkerOwner(node, new HashSet<>());
+    }
+
+    private static ClassNode resolveDslMarkerOwner(AnnotatedNode node, Set<ClassNode> visited) {
+        if (node == null) {
+            return null;
+        }
+        if (node instanceof ClassNode) {
+            ClassNode classNode = (ClassNode) node;
+            if (!visited.add(classNode)) {
+                return null;
+            }
+        }
         AnnotationNode marker = findAnnotation(node, DSL_MARKER_ANNOTATIONS);
         if (marker != null) {
             ClassNode resolved = resolveClassNodeFromExpression(marker.getMember("value"));
@@ -871,7 +886,7 @@ public class GroovyASTUtils {
         if (node instanceof Parameter) {
             ClassNode type = ((Parameter) node).getType();
             if (type != null) {
-                return resolveDslMarkerOwner(type);
+                return resolveDslMarkerOwner(type, visited);
             }
         } else if (node instanceof ClassNode) {
             ClassNode classNode = (ClassNode) node;
@@ -882,13 +897,13 @@ public class GroovyASTUtils {
                 superClass = null;
             }
             if (superClass != null) {
-                ClassNode resolved = resolveDslMarkerOwner(superClass);
+                ClassNode resolved = resolveDslMarkerOwner(superClass, visited);
                 if (resolved != null) {
                     return resolved;
                 }
             }
             for (ClassNode iface : classNode.getInterfaces()) {
-                ClassNode resolved = resolveDslMarkerOwner(iface);
+                ClassNode resolved = resolveDslMarkerOwner(iface, visited);
                 if (resolved != null) {
                     return resolved;
                 }
