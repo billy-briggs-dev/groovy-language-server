@@ -51,7 +51,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - Avoid duplicate class definitions from build output
 
 ### 3. **Semantic Analysis**
-- [ ] **Undefined variable detection** (#95)
+- [x] **Undefined variable detection** (#95)
   - Flag undeclared variables
   - Distinguish between dynamic properties and errors
   

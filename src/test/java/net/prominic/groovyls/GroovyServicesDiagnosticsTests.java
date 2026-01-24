@@ -141,4 +141,25 @@ class GroovyServicesDiagnosticsTests {
 		Assertions.assertEquals(uri, diagnostics.getUri());
 		Assertions.assertFalse(diagnostics.getDiagnostics().isEmpty());
 	}
+
+	@Test
+	void testUndefinedVariableDiagnostic() throws Exception {
+		Path filePath = srcRoot.resolve("Diagnostics.groovy");
+		String uri = filePath.toUri().toString();
+		String source = String.join("\n",
+				"class Diagnostics {",
+				"  void testMethod() {",
+				"    missingVar",
+				"  }",
+				"}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, source);
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		boolean published = publishLatch.await(2, TimeUnit.SECONDS);
+		Assertions.assertTrue(published, "Expected diagnostics to be published");
+		PublishDiagnosticsParams diagnostics = lastDiagnostics.get();
+		Assertions.assertNotNull(diagnostics);
+		Assertions.assertEquals(uri, diagnostics.getUri());
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Undefined variable: missingVar".equals(diag.getMessage())));
+	}
 }

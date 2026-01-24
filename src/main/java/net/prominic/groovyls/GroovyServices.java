@@ -47,6 +47,12 @@ import com.google.gson.JsonObject;
 
 import org.codehaus.groovy.GroovyBugError;
 import org.codehaus.groovy.ast.ASTNode;
+import org.codehaus.groovy.ast.ClassNode;
+import org.codehaus.groovy.ast.DynamicVariable;
+import org.codehaus.groovy.ast.Variable;
+import org.codehaus.groovy.ast.expr.VariableExpression;
+import org.codehaus.groovy.ast.expr.PropertyExpression;
+import org.codehaus.groovy.ast.expr.Expression;
 import org.codehaus.groovy.control.CompilationFailedException;
 import org.codehaus.groovy.control.ErrorCollector;
 import org.codehaus.groovy.control.Phases;
@@ -633,6 +639,13 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 					});
 		}
 
+		ASTNodeVisitor diagnosticsVisitor = astVisitor;
+		if (diagnosticsVisitor == null && compilationUnit != null) {
+			diagnosticsVisitor = new ASTNodeVisitor();
+			diagnosticsVisitor.visitCompilationUnit(compilationUnit);
+		}
+		collectUndefinedVariableDiagnostics(diagnosticsByFile, diagnosticsVisitor);
+
 		Set<PublishDiagnosticsParams> result = diagnosticsByFile.entrySet().stream()
 				.map(entry -> new PublishDiagnosticsParams(entry.getKey().toString(), entry.getValue()))
 				.collect(Collectors.toSet());
@@ -648,6 +661,96 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		}
 		prevDiagnosticsByFile = diagnosticsByFile;
 		return new DiagnosticsResult(result, fatalErrorUris);
+	}
+
+	private void collectUndefinedVariableDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile,
+			ASTNodeVisitor visitor) {
+		if (visitor == null) {
+			return;
+		}
+		for (ASTNode node : visitor.getNodes()) {
+			if (!(node instanceof VariableExpression)) {
+				if (node instanceof PropertyExpression) {
+					PropertyExpression propExpr = (PropertyExpression) node;
+					Expression objectExpr = propExpr.getObjectExpression();
+					if (objectExpr instanceof VariableExpression) {
+						VariableExpression objVar = (VariableExpression) objectExpr;
+						if ("this".equals(objVar.getName())) {
+							String propName = propExpr.getPropertyAsString();
+							if (propName != null && !hasEnclosingMember(propName, objVar, visitor)) {
+								URI uri = visitor.getURI(propExpr);
+								Range range = GroovyLanguageServerUtils.astNodeToRange(propExpr.getProperty());
+								if (uri != null && range != null) {
+									Diagnostic diagnostic = new Diagnostic();
+									diagnostic.setRange(range);
+									diagnostic.setSeverity(DiagnosticSeverity.Warning);
+									diagnostic.setMessage("Undefined variable: " + propName);
+									diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
+								}
+							}
+						}
+					}
+				}
+				continue;
+			}
+			VariableExpression variable = (VariableExpression) node;
+			String name = variable.getName();
+			if (name == null || name.isBlank()) {
+				continue;
+			}
+			if (name.equals("this") || name.equals("super") || name.equals("it")
+					|| name.equals("delegate") || name.equals("owner")) {
+				continue;
+			}
+			Variable accessed = variable.getAccessedVariable();
+			if (!(accessed instanceof DynamicVariable)) {
+				continue;
+			}
+			if (isClassName(name, visitor)) {
+				continue;
+			}
+			if (hasEnclosingMember(name, variable, visitor)) {
+				continue;
+			}
+			URI uri = visitor.getURI(variable);
+			if (uri == null) {
+				continue;
+			}
+			Range range = GroovyLanguageServerUtils.astNodeToRange(variable);
+			if (range == null) {
+				continue;
+			}
+			Diagnostic diagnostic = new Diagnostic();
+			diagnostic.setRange(range);
+			diagnostic.setSeverity(DiagnosticSeverity.Warning);
+			diagnostic.setMessage("Undefined variable: " + name);
+			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
+		}
+	}
+
+	private boolean isClassName(String name, ASTNodeVisitor visitor) {
+		if (visitor == null) {
+			return false;
+		}
+		for (ClassNode classNode : visitor.getClassNodes()) {
+			if (name.equals(classNode.getName()) || name.equals(classNode.getNameWithoutPackage())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean hasEnclosingMember(String name, VariableExpression variable, ASTNodeVisitor visitor) {
+		ASTNode current = variable;
+		while (current != null) {
+			if (current instanceof ClassNode) {
+				ClassNode classNode = (ClassNode) current;
+				return classNode.getProperty(name) != null || classNode.getField(name) != null
+						|| !classNode.getMethods(name).isEmpty();
+			}
+			current = visitor.getParent(current);
+		}
+		return false;
 	}
 
 	private void removeFatalErrorSources(Set<URI> fatalErrorUris) {

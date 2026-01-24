@@ -148,6 +148,12 @@ public class CompletionProvider {
 			populateItemsFromSourceMetaClassAssignments(prefix, items);
 		}
 
+		items.forEach(item -> {
+			if (item != null && item.getKind() == null) {
+				item.setKind(CompletionItemKind.Property);
+			}
+		});
+
 		if (isIncomplete) {
 			return CompletableFuture.completedFuture(Either.forRight(new CompletionList(true, items)));
 		}
