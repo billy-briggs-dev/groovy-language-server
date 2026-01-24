@@ -28,6 +28,8 @@ The following configuration options are supported:
 - groovy.formatting.spaceAfterCommas (`boolean` - spacing after commas)
 - groovy.formatting.spaceInsideBraces (`boolean` - spacing inside braces)
 - groovy.classpathRecursive (`boolean` - when true, classpath folders are searched recursively for _.jar_ files)
+- groovy.gradle.classpathScopes (`string[]` - Gradle dependency scopes to include: compile, runtime, test, provided)
+- groovy.gradle.includeBuildscript (`boolean` - include buildSrc/buildscript outputs in the classpath)
 - groovy.excludePatterns (`string[]` - glob patterns to exclude from project scanning)
 - groovy.sourceRoots (`string[]` - explicit source roots; defaults to auto-detecting _src/main/groovy_ and _src/test/groovy_)
 - groovy.maven.repositories (`string[]` - Maven repository URLs)

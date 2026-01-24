@@ -197,6 +197,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private GradleProjectInfo gradleProjectInfo;
 	private List<String> userClasspathList = new ArrayList<>();
 	private List<String> gradleClasspathList = Collections.emptyList();
+	private List<String> gradleClasspathScopes = new ArrayList<>();
+	private boolean gradleIncludeBuildscript = false;
 	private List<String> mavenClasspathList = Collections.emptyList();
 	private List<String> excludePatterns = new ArrayList<>();
 	private List<String> sourceRoots = new ArrayList<>();
@@ -314,6 +316,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		List<String> nextSourceRoots = new ArrayList<>();
 		List<String> nextMavenRepositories = new ArrayList<>();
 		List<String> nextMavenDependencies = new ArrayList<>();
+		List<String> nextGradleScopes = new ArrayList<>();
+		boolean nextGradleIncludeBuildscript = false;
 		boolean nextClasspathRecursive = false;
 
 		if (settings.has("groovy") && settings.get("groovy").isJsonObject()) {
@@ -329,6 +333,13 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				nextMavenRepositories.addAll(readStringArray(maven, "repositories"));
 				nextMavenDependencies.addAll(readStringArray(maven, "dependencies"));
 			}
+			if (groovy.has("gradle") && groovy.get("gradle").isJsonObject()) {
+				JsonObject gradle = groovy.get("gradle").getAsJsonObject();
+				nextGradleScopes.addAll(readStringArray(gradle, "classpathScopes"));
+				if (gradle.has("includeBuildscript") && gradle.get("includeBuildscript").isJsonPrimitive()) {
+					nextGradleIncludeBuildscript = gradle.get("includeBuildscript").getAsBoolean();
+				}
+			}
 		}
 
 		userClasspathList = classpathList;
@@ -337,6 +348,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		mavenRepositories = nextMavenRepositories;
 		mavenDependencies = nextMavenDependencies;
 		classpathRecursive = nextClasspathRecursive;
+		gradleClasspathScopes = nextGradleScopes;
+		gradleIncludeBuildscript = nextGradleIncludeBuildscript;
 
 		compilationUnitFactory.setExcludePatterns(excludePatterns);
 		compilationUnitFactory.setSourceRoots(sourceRoots);
@@ -344,6 +357,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		applyEffectiveClasspathAsync();
 		scheduleMavenIndexing();
+		scheduleGradleIndexing();
 
 		boolean structureChanged = !prevExcludePatterns.equals(excludePatterns)
 				|| !prevSourceRoots.equals(sourceRoots)
@@ -845,7 +859,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		final int generation = gradleIndexGeneration.incrementAndGet();
 		indexingScheduler.execute(() -> {
 			GradleProjectInfo nextProjectInfo = GradleProjectDetector.detect(workspaceRoot);
-			List<String> nextClasspath = GradleClasspathResolver.resolve(nextProjectInfo);
+			List<String> nextClasspath = GradleClasspathResolver.resolve(nextProjectInfo, gradleClasspathScopes,
+					gradleIncludeBuildscript);
 			if (gradleIndexGeneration.get() != generation) {
 				return;
 			}

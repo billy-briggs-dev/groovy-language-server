@@ -43,4 +43,16 @@ class GradleClasspathResolverTests {
         List<String> resolved = GradleClasspathResolver.resolve(null);
         Assertions.assertTrue(resolved.isEmpty());
     }
+
+    @Test
+    void resolveWithOptionsReturnsEmptyWhenProjectMissing() {
+        List<String> resolved = GradleClasspathResolver.resolve(null, Arrays.asList("compile", "test"), true);
+        Assertions.assertTrue(resolved.isEmpty());
+    }
+
+    @Test
+    void mergeClasspathHandlesNullLists() {
+        List<String> merged = GradleClasspathResolver.mergeClasspath(null, null);
+        Assertions.assertTrue(merged.isEmpty());
+    }
 }

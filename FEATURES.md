@@ -34,9 +34,9 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - [x] Auto-detect Gradle projects
   - [x] Extract classpath from `build.gradle` / `build.gradle.kts`
   - [x] Multi-module project support
-  - [ ] Transitive dependency resolution
-  - [ ] Buildscript classpath support
-  - [ ] Configuration-specific classpaths (compile, runtime, test)
+  - [x] Transitive dependency resolution
+  - [x] Buildscript classpath support
+  - [x] Configuration-specific classpaths (compile, runtime, test)
   
 - [ ] **Maven support**
   - Auto-detect Maven projects

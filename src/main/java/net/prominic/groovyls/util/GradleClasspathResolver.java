@@ -34,12 +34,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import org.gradle.tooling.GradleConnector;
 import org.gradle.tooling.ProjectConnection;
 import org.gradle.tooling.model.idea.IdeaCompilerOutput;
 import org.gradle.tooling.model.idea.IdeaDependency;
+import org.gradle.tooling.model.idea.IdeaDependencyScope;
 import org.gradle.tooling.model.idea.IdeaModule;
+import org.gradle.tooling.model.idea.IdeaModuleDependency;
 import org.gradle.tooling.model.idea.IdeaProject;
 import org.gradle.tooling.model.idea.IdeaSingleEntryLibraryDependency;
 
@@ -61,12 +64,17 @@ public final class GradleClasspathResolver {
     }
 
     public static List<String> resolve(GradleProjectInfo projectInfo) {
+        return resolve(projectInfo, Collections.emptyList(), false);
+    }
+
+    public static List<String> resolve(GradleProjectInfo projectInfo, List<String> scopes,
+            boolean includeBuildscript) {
         if (projectInfo == null || projectInfo.getBuildFiles().isEmpty()) {
             return Collections.emptyList();
         }
 
         String key = projectInfo.getRoot().toAbsolutePath().normalize().toString();
-        String signature = buildSignature(projectInfo);
+        String signature = buildSignature(projectInfo, scopes, includeBuildscript);
         CacheEntry cached = CACHE.get(key);
         if (cached != null && signature.equals(cached.signature)) {
             return new ArrayList<>(cached.classpath);
@@ -79,28 +87,21 @@ public final class GradleClasspathResolver {
                     .connect();
             IdeaProject ideaProject = connection.getModel(IdeaProject.class);
             Set<String> classpathEntries = new LinkedHashSet<>();
+            Set<String> allowedScopes = normalizeScopes(scopes);
+
+            Map<String, IdeaModule> modulesByKey = ideaProject.getModules().stream().collect(Collectors.toMap(
+                    GradleClasspathResolver::moduleKey,
+                    module -> module,
+                    (first, second) -> first));
+
+            Set<IdeaModule> visited = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
             for (IdeaModule module : ideaProject.getModules()) {
-                IdeaCompilerOutput output = module.getCompilerOutput();
-                if (output != null) {
-                    File mainOutput = output.getOutputDir();
-                    if (mainOutput != null && mainOutput.exists()) {
-                        classpathEntries.add(mainOutput.getAbsolutePath());
-                    }
-                    File testOutput = output.getTestOutputDir();
-                    if (testOutput != null && testOutput.exists()) {
-                        classpathEntries.add(testOutput.getAbsolutePath());
-                    }
-                }
+                collectModuleClasspath(module, classpathEntries, allowedScopes, modulesByKey, visited);
+            }
 
-                for (IdeaDependency dependency : module.getDependencies()) {
-                    if (dependency instanceof IdeaSingleEntryLibraryDependency) {
-                        File file = ((IdeaSingleEntryLibraryDependency) dependency).getFile();
-                        if (file != null && file.exists()) {
-                            classpathEntries.add(file.getAbsolutePath());
-                        }
-                    }
-                }
+            if (includeBuildscript) {
+                addBuildscriptOutputs(projectInfo, classpathEntries);
             }
 
             List<String> resolved = new ArrayList<>(classpathEntries);
@@ -128,11 +129,18 @@ public final class GradleClasspathResolver {
     }
 
     private static String buildSignature(GradleProjectInfo projectInfo) {
+        return buildSignature(projectInfo, Collections.emptyList(), false);
+    }
+
+    private static String buildSignature(GradleProjectInfo projectInfo, List<String> scopes,
+            boolean includeBuildscript) {
         List<Path> files = new ArrayList<>();
         files.addAll(projectInfo.getBuildFiles());
         files.addAll(projectInfo.getSettingsFiles());
         files.sort(Comparator.comparing(Path::toString));
         StringBuilder signature = new StringBuilder();
+        signature.append("scopes=").append(String.join(",", normalizeScopes(scopes))).append(";");
+        signature.append("buildscript=").append(includeBuildscript).append("|");
         for (Path file : files) {
             signature.append(file.toAbsolutePath().normalize());
             signature.append(":");
@@ -144,6 +152,122 @@ public final class GradleClasspathResolver {
             signature.append("|");
         }
         return signature.toString();
+    }
+
+    private static void collectModuleClasspath(IdeaModule module, Set<String> classpathEntries,
+            Set<String> allowedScopes, Map<String, IdeaModule> modulesByKey, Set<IdeaModule> visited) {
+        if (module == null || visited.contains(module)) {
+            return;
+        }
+        visited.add(module);
+
+        IdeaCompilerOutput output = module.getCompilerOutput();
+        if (output != null) {
+            File mainOutput = output.getOutputDir();
+            if (mainOutput != null && mainOutput.exists()) {
+                classpathEntries.add(mainOutput.getAbsolutePath());
+            }
+            File testOutput = output.getTestOutputDir();
+            if (testOutput != null && testOutput.exists()) {
+                classpathEntries.add(testOutput.getAbsolutePath());
+            }
+        }
+
+        for (IdeaDependency dependency : module.getDependencies()) {
+            if (!isScopeAllowed(dependency, allowedScopes)) {
+                continue;
+            }
+            if (dependency instanceof IdeaSingleEntryLibraryDependency) {
+                File file = ((IdeaSingleEntryLibraryDependency) dependency).getFile();
+                if (file != null && file.exists()) {
+                    classpathEntries.add(file.getAbsolutePath());
+                }
+            } else if (dependency instanceof IdeaModuleDependency) {
+                IdeaModuleDependency moduleDependency = (IdeaModuleDependency) dependency;
+                IdeaModule target = resolveModule(moduleDependency.getTargetModuleName(), modulesByKey);
+                collectModuleClasspath(target, classpathEntries, allowedScopes, modulesByKey, visited);
+            }
+        }
+    }
+
+    private static boolean isScopeAllowed(IdeaDependency dependency, Set<String> allowedScopes) {
+        if (allowedScopes == null || allowedScopes.isEmpty() || dependency == null) {
+            return true;
+        }
+        IdeaDependencyScope scope = dependency.getScope();
+        if (scope == null || scope.getScope() == null) {
+            return true;
+        }
+        return allowedScopes.contains(scope.getScope().toUpperCase());
+    }
+
+    private static Set<String> normalizeScopes(List<String> scopes) {
+        if (scopes == null) {
+            return Collections.emptySet();
+        }
+        return scopes.stream().filter(scope -> scope != null && !scope.isBlank())
+                .map(scope -> scope.trim().toUpperCase())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private static String moduleKey(IdeaModule module) {
+        if (module == null || module.getGradleProject() == null) {
+            return "";
+        }
+        String path = module.getGradleProject().getPath();
+        return path == null ? "" : path;
+    }
+
+    private static IdeaModule resolveModule(String targetName, Map<String, IdeaModule> modulesByKey) {
+        if (targetName == null || modulesByKey == null || modulesByKey.isEmpty()) {
+            return null;
+        }
+        IdeaModule direct = modulesByKey.get(targetName);
+        if (direct != null) {
+            return direct;
+        }
+        String normalized = targetName.startsWith(":") ? targetName : ":" + targetName;
+        IdeaModule normalizedMatch = modulesByKey.get(normalized);
+        if (normalizedMatch != null) {
+            return normalizedMatch;
+        }
+        String leaf = targetName.contains(":") ? targetName.substring(targetName.lastIndexOf(':') + 1)
+                : targetName;
+        for (Map.Entry<String, IdeaModule> entry : modulesByKey.entrySet()) {
+            String key = entry.getKey();
+            if (key == null) {
+                continue;
+            }
+            String keyLeaf = key.contains(":") ? key.substring(key.lastIndexOf(':') + 1) : key;
+            if (leaf.equals(keyLeaf)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private static void addBuildscriptOutputs(GradleProjectInfo projectInfo, Set<String> classpathEntries) {
+        if (projectInfo == null || projectInfo.getRoot() == null) {
+            return;
+        }
+        Path buildSrc = projectInfo.getRoot().resolve("buildSrc");
+        if (!Files.isDirectory(buildSrc)) {
+            return;
+        }
+        addIfExists(classpathEntries, buildSrc.resolve("build").resolve("classes").resolve("java").resolve("main"));
+        addIfExists(classpathEntries, buildSrc.resolve("build").resolve("classes").resolve("groovy").resolve("main"));
+        addIfExists(classpathEntries, buildSrc.resolve("build").resolve("classes").resolve("kotlin").resolve("main"));
+        addIfExists(classpathEntries, buildSrc.resolve("build").resolve("resources").resolve("main"));
+    }
+
+    private static void addIfExists(Set<String> classpathEntries, Path path) {
+        if (path == null) {
+            return;
+        }
+        File file = path.toFile();
+        if (file.exists()) {
+            classpathEntries.add(file.getAbsolutePath());
+        }
     }
 
     private static void loadCache() {

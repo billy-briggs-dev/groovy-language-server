@@ -208,6 +208,19 @@
           "default": false,
           "description": "When true, classpath folders are searched recursively for .jar files."
         },
+        "groovy.gradle.classpathScopes": {
+          "type": "array",
+          "default": ["compile", "runtime", "test"],
+          "description": "Gradle dependency scopes to include in the Groovy classpath (compile, runtime, test, provided).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "groovy.gradle.includeBuildscript": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include buildSrc/buildscript outputs in the Groovy classpath."
+        },
         "groovy.excludePatterns": {
           "type": "array",
           "default": null,
