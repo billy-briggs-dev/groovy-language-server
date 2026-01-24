@@ -672,6 +672,7 @@ public class CompletionProvider {
 
 	private void populateItemsFromScope(ASTNode node, String namePrefix, List<CompletionItem> items) {
 		Set<String> existingNames = new HashSet<>();
+		populateDslContextItems(node, namePrefix, existingNames, items);
 		ASTNode current = node;
 		while (current != null) {
 			if (current instanceof ClassNode) {
@@ -692,6 +693,26 @@ public class CompletionProvider {
 		if (namePrefix != null && !namePrefix.isEmpty()) {
 			populateTypes(node, namePrefix, existingNames, items);
 		}
+	}
+
+	private void populateDslContextItems(ASTNode node, String namePrefix, Set<String> existingNames,
+			List<CompletionItem> items) {
+		ClassNode delegateType = GroovyASTUtils.getDelegatesToType(node, ast);
+		if (delegateType == null) {
+			return;
+		}
+		String prefix = namePrefix == null ? "" : namePrefix;
+		List<PropertyNode> properties = delegateType.getProperties().stream().filter(prop -> !prop.isStatic())
+				.collect(Collectors.toList());
+		List<FieldNode> fields = delegateType.getFields().stream().filter(field -> !field.isStatic())
+				.collect(Collectors.toList());
+		populateItemsFromPropertiesAndFields(properties, fields, prefix, existingNames, items);
+		List<MethodNode> methods = delegateType.getMethods().stream().filter(method -> !method.isStatic())
+				.collect(Collectors.toList());
+		populateItemsFromMethods(methods, prefix, existingNames, items);
+		populateItemsFromPropertiesAndFields(ast.getMetaClassProperties(delegateType), Collections.emptyList(),
+				prefix, existingNames, items);
+		populateItemsFromMethods(ast.getMetaClassMethods(delegateType), prefix, existingNames, items);
 	}
 
 	private void populateKeywordItems(String namePrefix, Set<String> existingNames, List<CompletionItem> items) {

@@ -66,6 +66,7 @@ import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 
 public class GroovyASTUtils {
     private static final List<String> DELEGATES_TO_ANNOTATIONS = List.of("DelegatesTo", "groovy.lang.DelegatesTo");
+    private static final List<String> DSL_MARKER_ANNOTATIONS = List.of("DslMarker", "groovy.lang.DslMarker");
 
     public static ASTNode getEnclosingNodeOfType(ASTNode offsetNode, Class<? extends ASTNode> nodeType,
             ASTNodeVisitor astVisitor) {
@@ -549,6 +550,10 @@ public class GroovyASTUtils {
         return null;
     }
 
+    public static ClassNode getDelegatesToType(ASTNode node, ASTNodeVisitor astVisitor) {
+        return resolveDelegatesToType(node, astVisitor);
+    }
+
     private static ClassNode inferReturnType(MethodNode method, ASTNodeVisitor astVisitor) {
         if (method == null) {
             return null;
@@ -750,26 +755,153 @@ public class GroovyASTUtils {
             method = resolveMethodByName(call, astVisitor);
         }
         if (method == null) {
-            return null;
+            return resolveDslMarkerType(call, astVisitor);
         }
         int index = findClosureArgumentIndex(call, closure);
         if (index < 0) {
             index = findClosureParameterIndex(method);
         }
         if (index < 0 || index >= method.getParameters().length) {
-            return null;
+            return resolveDslMarkerType(call, astVisitor);
         }
         Parameter parameter = method.getParameters()[index];
         AnnotationNode delegatesTo = findAnnotation(parameter, DELEGATES_TO_ANNOTATIONS);
         if (delegatesTo == null) {
-            return null;
+            return resolveDslMarkerType(call, astVisitor);
         }
         Expression value = delegatesTo.getMember("value");
         ClassNode resolved = resolveClassNodeFromExpression(value);
         if (resolved != null) {
             return resolved;
         }
-        return parameter.getType();
+        return parameter.getType() != null ? parameter.getType() : resolveDslMarkerType(call, astVisitor);
+    }
+
+    private static ClassNode resolveDslMarkerType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
+        if (call == null || astVisitor == null) {
+            return null;
+        }
+        String methodName = call.getMethodAsString();
+        if (methodName == null) {
+            return null;
+        }
+        ClassNode resolved = findDslMarkerOwnerType(call, astVisitor, methodName);
+        if (resolved != null) {
+            return resolved;
+        }
+        return findDslMarkerClassType(call, astVisitor);
+    }
+
+    private static ClassNode findDslMarkerOwnerType(MethodCallExpression call, ASTNodeVisitor astVisitor,
+            String methodName) {
+        ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
+        if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
+            owner = ((ClassExpression) call.getObjectExpression()).getType();
+        }
+        if (owner == null && call.getObjectExpression() instanceof VariableExpression) {
+            String name = ((VariableExpression) call.getObjectExpression()).getName();
+            owner = findClassNodeByName(name, astVisitor);
+        }
+        if (owner == null && call.isImplicitThis()) {
+            ASTNode enclosingClass = getEnclosingNodeOfType(call, ClassNode.class, astVisitor);
+            if (enclosingClass instanceof ClassNode) {
+                owner = (ClassNode) enclosingClass;
+            }
+        }
+        if (owner == null) {
+            return null;
+        }
+        for (MethodNode candidate : owner.getMethods(methodName)) {
+            Parameter[] params = candidate.getParameters();
+            for (Parameter param : params) {
+                if (param.getType() != null && "groovy.lang.Closure".equals(param.getType().getName())) {
+                    ClassNode resolved = resolveDslMarkerOwner(param);
+                    if (resolved != null) {
+                        return resolved;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static ClassNode findDslMarkerClassType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
+        if (call == null || astVisitor == null) {
+            return null;
+        }
+        ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
+        if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
+            owner = ((ClassExpression) call.getObjectExpression()).getType();
+        }
+        if (owner == null && call.getObjectExpression() instanceof VariableExpression) {
+            String name = ((VariableExpression) call.getObjectExpression()).getName();
+            owner = findClassNodeByName(name, astVisitor);
+        }
+        if (owner == null && call.isImplicitThis()) {
+            ASTNode enclosingClass = getEnclosingNodeOfType(call, ClassNode.class, astVisitor);
+            if (enclosingClass instanceof ClassNode) {
+                owner = (ClassNode) enclosingClass;
+            }
+        }
+        if (owner == null) {
+            return null;
+        }
+        if (hasAnnotation(owner, DSL_MARKER_ANNOTATIONS)) {
+            return owner;
+        }
+        return null;
+    }
+
+    private static boolean hasAnnotation(AnnotatedNode node, List<String> names) {
+        if (node == null) {
+            return false;
+        }
+        return findAnnotation(node, names) != null;
+    }
+
+    private static ClassNode resolveDslMarkerOwner(AnnotatedNode node) {
+        AnnotationNode marker = findAnnotation(node, DSL_MARKER_ANNOTATIONS);
+        if (marker != null) {
+            ClassNode resolved = resolveClassNodeFromExpression(marker.getMember("value"));
+            if (resolved != null) {
+                return resolved;
+            }
+            if (node instanceof Parameter) {
+                ClassNode type = ((Parameter) node).getType();
+                return type != null ? type : null;
+            }
+            if (node instanceof ClassNode) {
+                return (ClassNode) node;
+            }
+            return ClassHelper.OBJECT_TYPE;
+        }
+        if (node instanceof Parameter) {
+            ClassNode type = ((Parameter) node).getType();
+            if (type != null) {
+                return resolveDslMarkerOwner(type);
+            }
+        } else if (node instanceof ClassNode) {
+            ClassNode classNode = (ClassNode) node;
+            ClassNode superClass = null;
+            try {
+                superClass = classNode.getSuperClass();
+            } catch (NoClassDefFoundError e) {
+                superClass = null;
+            }
+            if (superClass != null) {
+                ClassNode resolved = resolveDslMarkerOwner(superClass);
+                if (resolved != null) {
+                    return resolved;
+                }
+            }
+            for (ClassNode iface : classNode.getInterfaces()) {
+                ClassNode resolved = resolveDslMarkerOwner(iface);
+                if (resolved != null) {
+                    return resolved;
+                }
+            }
+        }
+        return null;
     }
 
     private static int findClosureArgumentIndex(MethodCallExpression call, ClosureExpression closure) {
