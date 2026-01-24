@@ -36,6 +36,7 @@ import java.util.regex.Pattern;
 
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.AnnotatedNode;
+import org.codehaus.groovy.ast.AnnotationNode;
 import org.codehaus.groovy.ast.ClassCodeVisitorSupport;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.ConstructorNode;
@@ -101,6 +102,7 @@ import org.codehaus.groovy.control.CompilationUnit;
 import org.codehaus.groovy.control.SourceUnit;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import java.lang.reflect.Modifier;
 
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 import net.prominic.lsp.utils.Positions;
@@ -151,6 +153,14 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 	private Map<String, Map<String, PropertyNode>> metaClassPropertiesByType = new HashMap<>();
 	private Map<URI, Map<String, Map<String, MethodNode>>> metaClassMethodsByURI = new HashMap<>();
 	private Map<URI, Map<String, Map<String, PropertyNode>>> metaClassPropertiesByURI = new HashMap<>();
+	private Map<String, List<MethodNode>> pendingCategoryMethodsByTarget = new HashMap<>();
+
+	private static final List<String> DELEGATE_ANNOTATIONS = List.of("Delegate", "groovy.lang.Delegate");
+	private static final List<String> MIXIN_ANNOTATIONS = List.of("Mixin", "groovy.lang.Mixin");
+	private static final List<String> CATEGORY_ANNOTATIONS = List.of("Category", "groovy.lang.Category");
+	private static final List<String> CANONICAL_ANNOTATIONS = List.of("Canonical", "groovy.transform.Canonical");
+	private static final List<String> IMMUTABLE_ANNOTATIONS = List.of("Immutable", "groovy.transform.Immutable");
+	private static final List<String> BUILDER_ANNOTATIONS = List.of("Builder", "groovy.transform.builder.Builder");
 
 	private void pushASTNode(ASTNode node) {
 		boolean isSynthetic = false;
@@ -321,6 +331,7 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		metaClassPropertiesByType.clear();
 		metaClassMethodsByURI.clear();
 		metaClassPropertiesByURI.clear();
+		pendingCategoryMethodsByTarget.clear();
 		unit.iterator().forEachRemaining(sourceUnit -> {
 			visitSourceUnit(sourceUnit);
 		});
@@ -338,6 +349,7 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 			classNodesByURI.remove(uri);
 			removeMetaClassEntriesForUri(uri);
 		});
+		pendingCategoryMethodsByTarget.clear();
 		unit.iterator().forEachRemaining(sourceUnit -> {
 			URI uri = sourceUnit.getSource().getURI();
 			if (!uris.contains(uri)) {
@@ -472,6 +484,8 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		classNodesByURI.get(uri).add(node);
 		pushASTNode(node);
 		try {
+			applyPendingCategoryMethods(node);
+			applyAstTransformations(node);
 			ClassNode unresolvedSuperClass = node.getUnresolvedSuperClass();
 			if (unresolvedSuperClass != null && unresolvedSuperClass.getLineNumber() != -1) {
 				pushASTNode(unresolvedSuperClass);
@@ -488,6 +502,392 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		} finally {
 			popASTNode();
 		}
+	}
+
+	private void applyAstTransformations(ClassNode node) {
+		applyDelegateTransformations(node);
+		applyMixinTransformations(node);
+		applyCategoryTransformations(node);
+		applyCanonicalTransformations(node);
+		applyImmutableTransformations(node);
+		applyBuilderTransformations(node);
+	}
+
+	private void applyDelegateTransformations(ClassNode node) {
+		node.getFields().forEach(field -> {
+			if (hasAnyAnnotation(field, DELEGATE_ANNOTATIONS)) {
+				addDelegatedMembers(node, field.getType());
+			}
+		});
+		node.getProperties().forEach(prop -> {
+			if (hasAnyAnnotation(prop, DELEGATE_ANNOTATIONS)) {
+				addDelegatedMembers(node, prop.getType());
+			}
+		});
+	}
+
+	private void applyMixinTransformations(ClassNode node) {
+		List<AnnotationNode> annotations = getAnnotationsByName(node, MIXIN_ANNOTATIONS);
+		for (AnnotationNode annotation : annotations) {
+			for (ClassNode mixinType : resolveAnnotationClassNodes(annotation)) {
+				addDelegatedMembers(node, mixinType);
+			}
+		}
+	}
+
+	private void applyCategoryTransformations(ClassNode node) {
+		List<AnnotationNode> annotations = getAnnotationsByName(node, CATEGORY_ANNOTATIONS);
+		if (annotations.isEmpty()) {
+			return;
+		}
+		List<MethodNode> categoryMethods = node.getMethods();
+		for (AnnotationNode annotation : annotations) {
+			for (ClassNode targetType : resolveAnnotationClassNodes(annotation)) {
+				ClassNode existingTarget = findClassNodeByName(targetType.getName());
+				if (existingTarget != null) {
+					addCategoryMethods(existingTarget, categoryMethods);
+				} else {
+					pendingCategoryMethodsByTarget
+							.computeIfAbsent(targetType.getName(), key -> new ArrayList<>())
+							.addAll(categoryMethods);
+					String simple = targetType.getNameWithoutPackage();
+					if (simple != null && !simple.equals(targetType.getName())) {
+						pendingCategoryMethodsByTarget
+								.computeIfAbsent(simple, key -> new ArrayList<>())
+								.addAll(categoryMethods);
+					}
+				}
+			}
+		}
+	}
+
+	private void applyCanonicalTransformations(ClassNode node) {
+		if (!hasAnyAnnotation(node, CANONICAL_ANNOTATIONS)) {
+			return;
+		}
+		addTupleConstructorIfMissing(node);
+		addMethodIfMissing(node, "toString", ClassHelper.STRING_TYPE, new Parameter[0], 0);
+		addMethodIfMissing(node, "hashCode", ClassHelper.int_TYPE, new Parameter[0], 0);
+		addMethodIfMissing(node, "equals", ClassHelper.boolean_TYPE,
+				new Parameter[] { new Parameter(ClassHelper.OBJECT_TYPE, "other") }, 0);
+	}
+
+	private void applyImmutableTransformations(ClassNode node) {
+		if (!hasAnyAnnotation(node, IMMUTABLE_ANNOTATIONS)) {
+			return;
+		}
+		applyCanonicalTransformations(node);
+		addTupleConstructorIfMissing(node);
+		addMethodIfMissing(node, "copyWith", node,
+				new Parameter[] { new Parameter(ClassHelper.MAP_TYPE, "values") }, 0);
+		addMethodIfMissing(node, "toMap", ClassHelper.MAP_TYPE, new Parameter[0], 0);
+	}
+
+	private void addTupleConstructorIfMissing(ClassNode node) {
+		if (node == null) {
+			return;
+		}
+		List<PropertyNode> props = node.getProperties();
+		if (props == null || props.isEmpty()) {
+			return;
+		}
+		Parameter[] parameters = new Parameter[props.size()];
+		for (int i = 0; i < props.size(); i++) {
+			PropertyNode prop = props.get(i);
+			parameters[i] = new Parameter(prop.getType(), prop.getName());
+		}
+		for (ConstructorNode constructor : node.getDeclaredConstructors()) {
+			if (sameParameterTypes(constructor.getParameters(), parameters)) {
+				return;
+			}
+		}
+		ConstructorNode ctor = new ConstructorNode(Modifier.PUBLIC, parameters,
+				ClassNode.EMPTY_ARRAY, new BlockStatement());
+		ctor.setSynthetic(true);
+		node.addConstructor(ctor);
+		ClassNode redirected = node.redirect();
+		if (redirected != null && redirected != node) {
+			boolean exists = redirected.getDeclaredConstructors().stream()
+					.anyMatch(existing -> sameParameterTypes(existing.getParameters(), parameters));
+			if (!exists) {
+				ConstructorNode redirectedCtor = new ConstructorNode(Modifier.PUBLIC, parameters,
+						ClassNode.EMPTY_ARRAY, new BlockStatement());
+				redirectedCtor.setSynthetic(true);
+				redirected.addConstructor(redirectedCtor);
+			}
+		}
+	}
+
+	private void applyBuilderTransformations(ClassNode node) {
+		if (!hasAnyAnnotation(node, BUILDER_ANNOTATIONS)) {
+			return;
+		}
+		ClassNode builderType = new ClassNode(node.getName() + "Builder", Modifier.PUBLIC,
+				ClassHelper.OBJECT_TYPE);
+		addMethodIfMissing(node, "builder", builderType, new Parameter[0], Modifier.STATIC);
+	}
+
+	private void applyPendingCategoryMethods(ClassNode node) {
+		List<MethodNode> pending = pendingCategoryMethodsByTarget.remove(node.getName());
+		if (pending == null) {
+			pending = pendingCategoryMethodsByTarget.remove(node.getNameWithoutPackage());
+		}
+		if (pending == null || pending.isEmpty()) {
+			return;
+		}
+		addCategoryMethods(node, pending);
+	}
+
+	private void addDelegatedMembers(ClassNode target, ClassNode source) {
+		if (target == null || source == null) {
+			return;
+		}
+		for (MethodNode method : source.getMethods()) {
+			if (method.isStatic() || isIgnoredDelegateMethod(method)) {
+				continue;
+			}
+			MethodNode synthetic = cloneMethod(method, target, method.getParameters(), method.getModifiers());
+			addMethodIfMissing(target, synthetic);
+		}
+		for (PropertyNode prop : source.getProperties()) {
+			addPropertyIfMissing(target, prop);
+		}
+		for (FieldNode field : source.getFields()) {
+			addFieldAsPropertyIfMissing(target, field);
+		}
+	}
+
+	private void addCategoryMethods(ClassNode target, List<MethodNode> categoryMethods) {
+		if (target == null || categoryMethods == null) {
+			return;
+		}
+		for (MethodNode method : categoryMethods) {
+			if (method.getName().equals("<init>")) {
+				continue;
+			}
+			Parameter[] params = method.getParameters();
+			int modifiers = method.getModifiers() & ~Modifier.STATIC;
+			if (method.isStatic() && params.length > 0 && isParameterTargetMatch(params[0], target)) {
+				Parameter[] trimmed = new Parameter[params.length - 1];
+				System.arraycopy(params, 1, trimmed, 0, trimmed.length);
+				params = trimmed;
+			}
+			MethodNode synthetic = cloneMethod(method, target, params, modifiers);
+			addMethodIfMissing(target, synthetic);
+		}
+	}
+
+	private boolean isIgnoredDelegateMethod(MethodNode method) {
+		ClassNode declaring = method.getDeclaringClass();
+		if (declaring == null) {
+			return false;
+		}
+		String name = declaring.getName();
+		return "java.lang.Object".equals(name)
+				|| "groovy.lang.GroovyObject".equals(name)
+				|| "groovy.lang.GroovyObjectSupport".equals(name);
+	}
+
+	private MethodNode cloneMethod(MethodNode source, ClassNode target, Parameter[] parameters, int modifiers) {
+		Parameter[] cloned = new Parameter[parameters.length];
+		for (int i = 0; i < parameters.length; i++) {
+			Parameter param = parameters[i];
+			Parameter copy = new Parameter(param.getType(), param.getName());
+			copy.setInitialExpression(param.getInitialExpression());
+			cloned[i] = copy;
+		}
+		MethodNode synthetic = new MethodNode(source.getName(), modifiers, source.getReturnType(),
+				cloned, new ClassNode[0], null);
+		synthetic.setDeclaringClass(target);
+		synthetic.setSynthetic(true);
+		return synthetic;
+	}
+
+	private void addMethodIfMissing(ClassNode target, String name, ClassNode returnType,
+			Parameter[] parameters, int modifiers) {
+		MethodNode synthetic = new MethodNode(name, modifiers, returnType, parameters,
+				new ClassNode[0], null);
+		synthetic.setDeclaringClass(target);
+		synthetic.setSynthetic(true);
+		addMethodIfMissing(target, synthetic);
+	}
+
+	private void addMethodIfMissing(ClassNode target, MethodNode method) {
+		addMethodIfMissingInternal(target, method);
+		ClassNode redirected = target != null ? target.redirect() : null;
+		if (redirected != null && redirected != target) {
+			MethodNode copy = cloneMethod(method, redirected, method.getParameters(), method.getModifiers());
+			addMethodIfMissingInternal(redirected, copy);
+		}
+	}
+
+	private void addMethodIfMissingInternal(ClassNode target, MethodNode method) {
+		if (target == null || method == null) {
+			return;
+		}
+		if (hasMethodSignature(target, method)) {
+			return;
+		}
+		target.addMethod(method);
+	}
+
+	private boolean hasMethodSignature(ClassNode target, MethodNode candidate) {
+		for (MethodNode existing : target.getMethods(candidate.getName())) {
+			if (sameParameterTypes(existing.getParameters(), candidate.getParameters())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean sameParameterTypes(Parameter[] a, Parameter[] b) {
+		if (a.length != b.length) {
+			return false;
+		}
+		for (int i = 0; i < a.length; i++) {
+			ClassNode aType = a[i].getType();
+			ClassNode bType = b[i].getType();
+			String aName = aType != null ? aType.getName() : null;
+			String bName = bType != null ? bType.getName() : null;
+			if (aName == null || bName == null || !aName.equals(bName)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private void addPropertyIfMissing(ClassNode target, PropertyNode prop) {
+		addPropertyIfMissingInternal(target, prop);
+		ClassNode redirected = target != null ? target.redirect() : null;
+		if (redirected != null && redirected != target) {
+			addPropertyIfMissingInternal(redirected, prop);
+		}
+	}
+
+	private void addPropertyIfMissingInternal(ClassNode target, PropertyNode prop) {
+		if (target == null || prop == null) {
+			return;
+		}
+		if (target.getProperty(prop.getName()) != null || target.getField(prop.getName()) != null) {
+			return;
+		}
+		PropertyNode synthetic = new PropertyNode(prop.getName(), prop.getModifiers(), prop.getType(),
+				target, null, null, null);
+		synthetic.setDeclaringClass(target);
+		synthetic.setSynthetic(true);
+		target.addProperty(synthetic);
+	}
+
+	private void addFieldAsPropertyIfMissing(ClassNode target, FieldNode field) {
+		addFieldAsPropertyIfMissingInternal(target, field);
+		ClassNode redirected = target != null ? target.redirect() : null;
+		if (redirected != null && redirected != target) {
+			addFieldAsPropertyIfMissingInternal(redirected, field);
+		}
+	}
+
+	private void addFieldAsPropertyIfMissingInternal(ClassNode target, FieldNode field) {
+		if (target == null || field == null) {
+			return;
+		}
+		if (target.getProperty(field.getName()) != null || target.getField(field.getName()) != null) {
+			return;
+		}
+		PropertyNode synthetic = new PropertyNode(field.getName(), field.getModifiers(), field.getType(),
+				target, null, null, null);
+		synthetic.setDeclaringClass(target);
+		synthetic.setSynthetic(true);
+		target.addProperty(synthetic);
+	}
+
+	private boolean isParameterTargetMatch(Parameter param, ClassNode target) {
+		ClassNode type = param.getType();
+		if (type == null || target == null) {
+			return false;
+		}
+		String name = type.getName();
+		return name.equals(target.getName())
+				|| (target.getNameWithoutPackage() != null && name.equals(target.getNameWithoutPackage()));
+	}
+
+	private boolean hasAnyAnnotation(AnnotatedNode node, List<String> names) {
+		for (AnnotationNode annotation : node.getAnnotations()) {
+			String fullName = annotation.getClassNode().getName();
+			String simple = annotation.getClassNode().getNameWithoutPackage();
+			if (names.contains(fullName) || (simple != null && names.contains(simple))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private List<AnnotationNode> getAnnotationsByName(AnnotatedNode node, List<String> names) {
+		List<AnnotationNode> result = new ArrayList<>();
+		for (AnnotationNode annotation : node.getAnnotations()) {
+			String fullName = annotation.getClassNode().getName();
+			String simple = annotation.getClassNode().getNameWithoutPackage();
+			if (names.contains(fullName) || (simple != null && names.contains(simple))) {
+				result.add(annotation);
+			}
+		}
+		return result;
+	}
+
+	private List<ClassNode> resolveAnnotationClassNodes(AnnotationNode annotation) {
+		Expression value = annotation.getMember("value");
+		if (value == null) {
+			return Collections.emptyList();
+		}
+		List<ClassNode> result = new ArrayList<>();
+		if (value instanceof ListExpression) {
+			ListExpression list = (ListExpression) value;
+			for (Expression expr : list.getExpressions()) {
+				ClassNode resolved = resolveClassNodeFromExpression(expr);
+				if (resolved != null) {
+					result.add(resolved);
+				}
+			}
+		} else {
+			ClassNode resolved = resolveClassNodeFromExpression(value);
+			if (resolved != null) {
+				result.add(resolved);
+			}
+		}
+		return result;
+	}
+
+	private ClassNode resolveClassNodeFromExpression(Expression expr) {
+		if (expr instanceof ClassExpression) {
+			ClassNode exprType = ((ClassExpression) expr).getType();
+			if (exprType != null && exprType.redirect() == ClassHelper.CLASS_Type
+					&& exprType.getGenericsTypes() != null && exprType.getGenericsTypes().length > 0) {
+				return exprType.getGenericsTypes()[0].getType();
+			}
+			if (exprType != null && exprType.redirect() == ClassHelper.CLASS_Type) {
+				return resolveClassNodeByName(expr.getText());
+			}
+			return exprType;
+		}
+		if (expr instanceof ConstantExpression) {
+			return resolveClassNodeByName(((ConstantExpression) expr).getText());
+		}
+		if (expr instanceof VariableExpression) {
+			return resolveClassNodeByName(((VariableExpression) expr).getName());
+		}
+		return null;
+	}
+
+	private ClassNode findClassNodeByName(String className) {
+		if (className == null) {
+			return null;
+		}
+		for (ClassNode classNode : getClassNodes()) {
+			if (className.equals(classNode.getName())
+					|| className.equals(classNode.getNameWithoutPackage())) {
+				return classNode;
+			}
+		}
+		return null;
 	}
 
 	@Override

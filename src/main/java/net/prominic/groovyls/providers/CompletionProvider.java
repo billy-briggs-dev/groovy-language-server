@@ -106,18 +106,7 @@ public class CompletionProvider {
 		URI uri = URI.create(textDocument.getUri());
 		completionUri = uri;
 		ASTNode offsetNode = ast.getNodeAtLineAndColumn(uri, position.getLine(), position.getCharacter());
-		if (offsetNode == null) {
-			List<CompletionItem> fallbackItems = new ArrayList<>();
-			if (hasMemberAccessInSource(position)) {
-				String prefix = getMemberNameFromSource(position);
-				if (prefix == null) {
-					prefix = "";
-				}
-				populateItemsFromSourceMetaClassAssignments(prefix, fallbackItems);
-			}
-			return CompletableFuture.completedFuture(Either.forLeft(fallbackItems));
-		}
-		ASTNode parentNode = ast.getParent(offsetNode);
+		ASTNode parentNode = offsetNode != null ? ast.getParent(offsetNode) : null;
 
 		isIncomplete = false;
 		List<CompletionItem> items = new ArrayList<>();
@@ -151,7 +140,7 @@ public class CompletionProvider {
 			}
 		}
 
-		if (hasMemberAccessInSource(position)) {
+		if (items.isEmpty() && hasMemberAccessInSource(position)) {
 			String prefix = getMemberNameFromSource(position);
 			if (prefix == null) {
 				prefix = "";
