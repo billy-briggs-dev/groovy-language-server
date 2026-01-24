@@ -32,6 +32,8 @@ public class GroovydocUtils {
 	private static final Pattern HTML_LINK_PATTERN = Pattern.compile("<a\\s+href=(\"|')(.*?)\\1\\s*>(.*?)</a>",
 			Pattern.CASE_INSENSITIVE);
 	private static final Pattern LINK_PARTS_PATTERN = Pattern.compile("([^\\s]+)(?:\\s+(.+))?");
+	private static final Pattern CLASS_REFERENCE_PATTERN = Pattern
+			.compile("[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)+");
 	private static final String GROOVYDOC_BASE_URL = "https://docs.groovy-lang.org/latest/html/api/";
 	private static final String JAVA_DOC_BASE_URL = "https://docs.oracle.com/en/java/javase/"
 			+ Runtime.version().feature() + "/docs/api/";
@@ -94,12 +96,12 @@ public class GroovydocUtils {
 	private static String reformatLine(String line) {
 		line = replaceInlineTags(line);
 		line = replaceHtmlLinks(line);
-		line = line.replaceAll("(?i)<pre>\\s*<code>", "\n\n```\n");
-		line = line.replaceAll("(?i)</code>\\s*</pre>", "\n```\n");
-		line = line.replaceAll("(?i)<pre>", "\n\n```\n");
-		line = line.replaceAll("(?i)</pre>", "\n```\n");
 		// remove all attributes (including namespaced)
 		line = line.replaceAll("<(\\w+)(?:\\s+\\w+(?::\\w+)?=(\"|\')[^\"\']*\\2)*\\s*(\\/{0,1})>", "<$1$3>");
+		line = line.replaceAll("(?i)<pre>(?!\\s*<code>)", "\n\n```\n");
+		line = line.replaceAll("(?i)</code>\\s*</pre>", "\n```\n");
+		line = line.replaceAll("(?i)<pre>\\s*<code>", "\n\n```\n");
+		line = line.replaceAll("(?i)</pre>", "\n```\n");
 		line = line.replaceAll("</?(em|i)>", "_");
 		line = line.replaceAll("</?(strong|b)>", "**");
 		line = line.replaceAll("</?(tt|code)>", "`");
@@ -194,7 +196,7 @@ public class GroovydocUtils {
 			classRef = reference.substring(0, hashIndex);
 			anchor = reference.substring(hashIndex + 1);
 		}
-		if (!classRef.contains(".")) {
+		if (!CLASS_REFERENCE_PATTERN.matcher(classRef).matches()) {
 			return null;
 		}
 		String baseUrl;
