@@ -35,9 +35,9 @@ import org.eclipse.lsp4j.TextEdit;
 import net.prominic.groovyls.util.FileContentsTracker;
 
 public class FormattingProvider {
-    private static final String[] OPERATORS = new String[] { ">>>=", "<<=", ">>=", "==", "!=", "<=", ">=", "&&",
-            "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", ">>>", "<<", ">>", "->", "=", "+", "-",
-            "*", "/", "%", "<", ">", "&", "|", "^", "?", ":" };
+	private static final String[] OPERATORS = new String[] { ">>>=", "<<=", ">>=", ">>>", "<<", ">>", "==", "!=",
+			"<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "->", "=", "+", "-",
+			"*", "/", "%", "<", ">", "&", "|", "^", "?", ":" };
     private static final String LINE_BREAK = "\n";
     private static final Set<String> NO_SPACE_OPERATORS = Set.of("++", "--");
 
@@ -226,14 +226,34 @@ public class FormattingProvider {
 		if (hasBraceInsideString(line)) {
 			return line;
 		}
-		if (settings.isSpaceInsideBraces()) {
-			String adjusted = line.replaceAll("\\{\\s*}", "{}");
-			adjusted = adjusted.replaceAll("\\{\\s+", "{ ");
-			adjusted = adjusted.replaceAll("\\s+}", " }");
-			return adjusted.replaceAll("\\{ \\}", "{}");
+		StringBuilder builder = new StringBuilder();
+		int index = 0;
+		while (index < line.length()) {
+			char character = line.charAt(index);
+			if (character == '{') {
+				builder.append('{');
+				index++;
+				while (index < line.length() && Character.isWhitespace(line.charAt(index))) {
+					index++;
+				}
+				if (settings.isSpaceInsideBraces() && index < line.length() && line.charAt(index) != '}') {
+					builder.append(' ');
+				}
+				continue;
+			}
+			if (character == '}') {
+				trimTrailingWhitespace(builder);
+				if (settings.isSpaceInsideBraces() && builder.length() > 0 && builder.charAt(builder.length() - 1) != '{') {
+					builder.append(' ');
+				}
+				builder.append('}');
+				index++;
+				continue;
+			}
+			builder.append(character);
+			index++;
 		}
-		String adjusted = line.replaceAll("\\{\\s+", "{");
-		return adjusted.replaceAll("\\s+}", "}");
+		return builder.toString();
 	}
 
 	private int appendStringLiteral(String line, int startIndex, StringBuilder builder) {
