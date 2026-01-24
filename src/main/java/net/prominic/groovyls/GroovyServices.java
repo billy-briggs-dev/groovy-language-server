@@ -49,6 +49,7 @@ import org.codehaus.groovy.GroovyBugError;
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.DynamicVariable;
+import org.codehaus.groovy.ast.ImportNode;
 import org.codehaus.groovy.ast.Variable;
 import org.codehaus.groovy.ast.expr.VariableExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
@@ -645,6 +646,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			diagnosticsVisitor.visitCompilationUnit(compilationUnit);
 		}
 		collectUndefinedVariableDiagnostics(diagnosticsByFile, diagnosticsVisitor);
+		collectUnusedImportDiagnostics(diagnosticsByFile, diagnosticsVisitor);
 
 		Set<PublishDiagnosticsParams> result = diagnosticsByFile.entrySet().stream()
 				.map(entry -> new PublishDiagnosticsParams(entry.getKey().toString(), entry.getValue()))
@@ -724,6 +726,70 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			diagnostic.setRange(range);
 			diagnostic.setSeverity(DiagnosticSeverity.Warning);
 			diagnostic.setMessage("Undefined variable: " + name);
+			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
+		}
+	}
+
+	private void collectUnusedImportDiagnostics(Map<URI, List<Diagnostic>> diagnosticsByFile,
+			ASTNodeVisitor visitor) {
+		if (visitor == null || fileContentsTracker == null) {
+			return;
+		}
+		for (ASTNode node : visitor.getNodes()) {
+			if (!(node instanceof ImportNode)) {
+				continue;
+			}
+			ImportNode importNode = (ImportNode) node;
+			if (importNode.isStar() || importNode.isStatic()) {
+				continue;
+			}
+			String importName = importNode.getAlias();
+			if (importName == null || importName.isBlank()) {
+				ClassNode importType = importNode.getType();
+				if (importType == null) {
+					continue;
+				}
+				importName = importType.getNameWithoutPackage();
+			}
+			if (importName == null || importName.isBlank()) {
+				continue;
+			}
+			URI uri = visitor.getURI(importNode);
+			if (uri == null) {
+				continue;
+			}
+			String contents = fileContentsTracker.getContents(uri);
+			if (contents == null) {
+				continue;
+			}
+			Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+			if (range == null) {
+				continue;
+			}
+			String searchContent = contents;
+			int importLine = range.getStart().getLine();
+			String[] lines = contents.split("\\R", -1);
+			if (importLine >= 0 && importLine < lines.length) {
+				StringBuilder builder = new StringBuilder();
+				for (int i = 0; i < lines.length; i++) {
+					if (i == importLine) {
+						continue;
+					}
+					builder.append(lines[i]);
+					if (i < lines.length - 1) {
+						builder.append("\n");
+					}
+				}
+				searchContent = builder.toString();
+			}
+			Pattern pattern = Pattern.compile("\\b" + Pattern.quote(importName) + "\\b");
+			if (pattern.matcher(searchContent).find()) {
+				continue;
+			}
+			Diagnostic diagnostic = new Diagnostic();
+			diagnostic.setRange(range);
+			diagnostic.setSeverity(DiagnosticSeverity.Warning);
+			diagnostic.setMessage("Unused import: " + importName);
 			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
 		}
 	}

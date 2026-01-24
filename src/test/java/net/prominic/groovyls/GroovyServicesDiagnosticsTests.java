@@ -162,4 +162,26 @@ class GroovyServicesDiagnosticsTests {
 		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
 				.anyMatch(diag -> "Undefined variable: missingVar".equals(diag.getMessage())));
 	}
+
+	@Test
+	void testUnusedImportDiagnostic() throws Exception {
+		Path filePath = srcRoot.resolve("Diagnostics.groovy");
+		String uri = filePath.toUri().toString();
+		String source = String.join("\n",
+				"import java.util.List",
+				"class Diagnostics {",
+				"  void testMethod() {",
+				"    def value = 'abc'",
+				"  }",
+				"}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, source);
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		boolean published = publishLatch.await(2, TimeUnit.SECONDS);
+		Assertions.assertTrue(published, "Expected diagnostics to be published");
+		PublishDiagnosticsParams diagnostics = lastDiagnostics.get();
+		Assertions.assertNotNull(diagnostics);
+		Assertions.assertEquals(uri, diagnostics.getUri());
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Unused import: List".equals(diag.getMessage())));
+	}
 }
