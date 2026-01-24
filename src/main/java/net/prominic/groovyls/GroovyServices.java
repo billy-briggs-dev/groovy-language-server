@@ -164,6 +164,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private ScheduledFuture<?> pendingCompile;
 	private URI pendingContextUri;
 	private final FormattingSettings formattingSettings = new FormattingSettings();
+	private final FormattingProvider formattingProvider = new FormattingProvider(fileContentsTracker, formattingSettings);
 
 	public GroovyServices(ICompilationUnitFactory factory) {
 		compilationUnitFactory = factory;
@@ -209,8 +210,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			return;
 		}
 		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(params.getTextDocument().getUri());
-		FormattingProvider provider = new FormattingProvider(fileContentsTracker, formattingSettings);
-		List<TextEdit> edits = provider.provideDocumentFormatting(textDocument).join();
+		List<TextEdit> edits = formattingProvider.provideDocumentFormatting(textDocument).join();
 		if (edits.isEmpty()) {
 			return;
 		}
@@ -299,14 +299,12 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	@Override
 	public CompletableFuture<List<? extends TextEdit>> formatting(DocumentFormattingParams params) {
-		FormattingProvider provider = new FormattingProvider(fileContentsTracker, formattingSettings);
-		return provider.provideDocumentFormatting(params.getTextDocument());
+		return formattingProvider.provideDocumentFormatting(params.getTextDocument());
 	}
 
 	@Override
 	public CompletableFuture<List<? extends TextEdit>> rangeFormatting(DocumentRangeFormattingParams params) {
-		FormattingProvider provider = new FormattingProvider(fileContentsTracker, formattingSettings);
-		return provider.provideRangeFormatting(params);
+		return formattingProvider.provideRangeFormatting(params);
 	}
 
 	// --- REQUESTS

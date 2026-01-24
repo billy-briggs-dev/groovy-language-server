@@ -23,6 +23,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 import org.eclipse.lsp4j.DocumentRangeFormattingParams;
@@ -34,10 +35,11 @@ import org.eclipse.lsp4j.TextEdit;
 import net.prominic.groovyls.util.FileContentsTracker;
 
 public class FormattingProvider {
-	private static final String[] OPERATORS = new String[] { ">>>=", "<<=", ">>=", "==", "!=", "<=", ">=", "&&",
-			"||", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", ">>>", "<<", ">>", "->", "=", "+", "-", "*", "/",
-			"%", "<", ">", "&", "|", "^", "?", ":" };
-	private static final String LINE_BREAK = "\n";
+    private static final String[] OPERATORS = new String[] { ">>>=", "<<=", ">>=", "==", "!=", "<=", ">=", "&&",
+            "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", ">>>", "<<", ">>", "->", "=", "+", "-",
+            "*", "/", "%", "<", ">", "&", "|", "^", "?", ":" };
+    private static final String LINE_BREAK = "\n";
+    private static final Set<String> NO_SPACE_OPERATORS = Set.of("++", "--");
 
 	private final FileContentsTracker files;
 	private final FormattingSettings settings;
@@ -264,7 +266,7 @@ public class FormattingProvider {
 	}
 
 	private boolean shouldSpaceOperator(String operator) {
-		return !operator.equals("++") && !operator.equals("--");
+        return !NO_SPACE_OPERATORS.contains(operator);
 	}
 
 	private void trimTrailingWhitespace(StringBuilder builder) {
@@ -332,9 +334,9 @@ public class FormattingProvider {
 		String[] split = contents.split(LINE_BREAK, -1);
 		List<String> lines = new ArrayList<>();
 		Collections.addAll(lines, split);
-		if (lines.size() == 0) {
-			lines.add("");
-		}
+        if (lines.isEmpty()) {
+            lines.add("");
+        }
 		return lines;
 	}
 }
