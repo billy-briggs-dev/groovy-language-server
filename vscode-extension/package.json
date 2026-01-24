@@ -77,6 +77,40 @@
           "items": {
             "type": "string"
           }
+        },
+        "groovy.formatting.formatOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Formats Groovy documents on save using the language server."
+        },
+        "groovy.formatting.indentSize": {
+          "type": "integer",
+          "default": 4,
+          "description": "Number of spaces to use for each indentation level."
+        },
+        "groovy.formatting.braceStyle": {
+          "type": "string",
+          "default": "sameLine",
+          "enum": [
+            "sameLine",
+            "nextLine"
+          ],
+          "description": "Brace placement style for Groovy formatting."
+        },
+        "groovy.formatting.spaceAroundOperators": {
+          "type": "boolean",
+          "default": true,
+          "description": "Insert spaces around common operators."
+        },
+        "groovy.formatting.spaceAfterCommas": {
+          "type": "boolean",
+          "default": true,
+          "description": "Insert a space after commas."
+        },
+        "groovy.formatting.spaceInsideBraces": {
+          "type": "boolean",
+          "default": false,
+          "description": "Insert spaces inside brace blocks."
         }
       }
     }

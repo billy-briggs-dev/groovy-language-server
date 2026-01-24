@@ -72,6 +72,8 @@ import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
 import org.eclipse.lsp4j.DidSaveTextDocumentParams;
+import org.eclipse.lsp4j.DocumentFormattingParams;
+import org.eclipse.lsp4j.DocumentRangeFormattingParams;
 import org.eclipse.lsp4j.DocumentSymbol;
 import org.eclipse.lsp4j.DocumentSymbolParams;
 import org.eclipse.lsp4j.Hover;
@@ -88,6 +90,7 @@ import org.eclipse.lsp4j.SignatureHelpParams;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
+import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.TypeDefinitionParams;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.WorkspaceEdit;
@@ -109,6 +112,8 @@ import net.prominic.groovyls.config.ICompilationUnitFactory;
 import net.prominic.groovyls.providers.CompletionProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
+import net.prominic.groovyls.providers.FormattingProvider;
+import net.prominic.groovyls.providers.FormattingSettings;
 import net.prominic.groovyls.providers.HoverProvider;
 import net.prominic.groovyls.providers.ReferenceProvider;
 import net.prominic.groovyls.providers.RenameProvider;
@@ -158,6 +163,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private final Object compileLock = new Object();
 	private ScheduledFuture<?> pendingCompile;
 	private URI pendingContextUri;
+	private final FormattingSettings formattingSettings = new FormattingSettings();
 
 	public GroovyServices(ICompilationUnitFactory factory) {
 		compilationUnitFactory = factory;
@@ -199,7 +205,18 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	@Override
 	public void didSave(DidSaveTextDocumentParams params) {
-		// nothing to handle on save at this time
+		if (!formattingSettings.isFormatOnSave() || languageClient == null) {
+			return;
+		}
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(params.getTextDocument().getUri());
+		FormattingProvider provider = new FormattingProvider(fileContentsTracker, formattingSettings);
+		List<TextEdit> edits = provider.provideDocumentFormatting(textDocument).join();
+		if (edits.isEmpty()) {
+			return;
+		}
+		WorkspaceEdit workspaceEdit = new WorkspaceEdit();
+		workspaceEdit.setChanges(Collections.singletonMap(textDocument.getUri(), edits));
+		languageClient.applyEdit(new org.eclipse.lsp4j.ApplyWorkspaceEditParams(workspaceEdit));
 	}
 
 	@Override
@@ -223,6 +240,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		}
 		JsonObject settings = (JsonObject) params.getSettings();
 		this.updateClasspath(settings);
+		this.updateFormattingSettings(settings);
 	}
 
 	private void updateClasspath(JsonObject settings) {
@@ -240,6 +258,55 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		userClasspathList = classpathList;
 		applyEffectiveClasspath();
+	}
+
+	private void updateFormattingSettings(JsonObject settings) {
+		if (!settings.has("groovy") || !settings.get("groovy").isJsonObject()) {
+			return;
+		}
+		JsonObject groovy = settings.get("groovy").getAsJsonObject();
+		if (!groovy.has("formatting") || !groovy.get("formatting").isJsonObject()) {
+			return;
+		}
+		JsonObject formatting = groovy.get("formatting").getAsJsonObject();
+		if (formatting.has("indentSize") && formatting.get("indentSize").isJsonPrimitive()) {
+			int indentSize = formatting.get("indentSize").getAsInt();
+			if (indentSize > 0) {
+				formattingSettings.setIndentSize(indentSize);
+			}
+		}
+		if (formatting.has("braceStyle") && formatting.get("braceStyle").isJsonPrimitive()) {
+			String braceStyle = formatting.get("braceStyle").getAsString();
+			if ("nextLine".equalsIgnoreCase(braceStyle)) {
+				formattingSettings.setBraceStyle(FormattingSettings.BraceStyle.NEXT_LINE);
+			} else {
+				formattingSettings.setBraceStyle(FormattingSettings.BraceStyle.SAME_LINE);
+			}
+		}
+		if (formatting.has("spaceAroundOperators") && formatting.get("spaceAroundOperators").isJsonPrimitive()) {
+			formattingSettings.setSpaceAroundOperators(formatting.get("spaceAroundOperators").getAsBoolean());
+		}
+		if (formatting.has("spaceAfterCommas") && formatting.get("spaceAfterCommas").isJsonPrimitive()) {
+			formattingSettings.setSpaceAfterCommas(formatting.get("spaceAfterCommas").getAsBoolean());
+		}
+		if (formatting.has("spaceInsideBraces") && formatting.get("spaceInsideBraces").isJsonPrimitive()) {
+			formattingSettings.setSpaceInsideBraces(formatting.get("spaceInsideBraces").getAsBoolean());
+		}
+		if (formatting.has("formatOnSave") && formatting.get("formatOnSave").isJsonPrimitive()) {
+			formattingSettings.setFormatOnSave(formatting.get("formatOnSave").getAsBoolean());
+		}
+	}
+
+	@Override
+	public CompletableFuture<List<? extends TextEdit>> formatting(DocumentFormattingParams params) {
+		FormattingProvider provider = new FormattingProvider(fileContentsTracker, formattingSettings);
+		return provider.provideDocumentFormatting(params.getTextDocument());
+	}
+
+	@Override
+	public CompletableFuture<List<? extends TextEdit>> rangeFormatting(DocumentRangeFormattingParams params) {
+		FormattingProvider provider = new FormattingProvider(fileContentsTracker, formattingSettings);
+		return provider.provideRangeFormatting(params);
 	}
 
 	// --- REQUESTS
