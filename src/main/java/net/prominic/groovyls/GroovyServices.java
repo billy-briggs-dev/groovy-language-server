@@ -735,6 +735,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		if (visitor == null || fileContentsTracker == null) {
 			return;
 		}
+		Map<URI, List<ImportNode>> importsByUri = new HashMap<>();
 		for (ASTNode node : visitor.getNodes()) {
 			if (!(node instanceof ImportNode)) {
 				continue;
@@ -743,55 +744,87 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			if (importNode.isStar() || importNode.isStatic()) {
 				continue;
 			}
-			String importName = importNode.getAlias();
-			if (importName == null || importName.isBlank()) {
-				ClassNode importType = importNode.getType();
-				if (importType == null) {
-					continue;
-				}
-				importName = importType.getNameWithoutPackage();
-			}
-			if (importName == null || importName.isBlank()) {
+			Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+			if (range == null) {
 				continue;
 			}
 			URI uri = visitor.getURI(importNode);
 			if (uri == null) {
 				continue;
 			}
+			importsByUri.computeIfAbsent(uri, key -> new ArrayList<>()).add(importNode);
+		}
+		for (Map.Entry<URI, List<ImportNode>> entry : importsByUri.entrySet()) {
+			URI uri = entry.getKey();
+			List<ImportNode> importNodes = entry.getValue();
 			String contents = fileContentsTracker.getContents(uri);
-			if (contents == null) {
+			if (contents == null || importNodes.isEmpty()) {
 				continue;
 			}
-			Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
-			if (range == null) {
-				continue;
-			}
-			String searchContent = contents;
-			int importLine = range.getStart().getLine();
 			String[] lines = contents.split("\\R", -1);
-			if (importLine >= 0 && importLine < lines.length) {
-				StringBuilder builder = new StringBuilder();
-				for (int i = 0; i < lines.length; i++) {
-					if (i == importLine) {
+			Set<Integer> importLines = new HashSet<>();
+			for (ImportNode importNode : importNodes) {
+				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+				if (range == null) {
+					continue;
+				}
+				importLines.add(range.getStart().getLine());
+			}
+			StringBuilder builder = new StringBuilder(contents.length());
+			for (int i = 0; i < lines.length; i++) {
+				if (!importLines.contains(i)) {
+					builder.append(lines[i]);
+				}
+				if (i < lines.length - 1) {
+					builder.append("\n");
+				}
+			}
+			String searchContent = builder.toString();
+			for (ImportNode importNode : importNodes) {
+				String importName = importNode.getAlias();
+				ClassNode importType = importNode.getType();
+				if (importName == null || importName.isBlank()) {
+					if (importType == null) {
 						continue;
 					}
-					builder.append(lines[i]);
-					if (i < lines.length - 1) {
-						builder.append("\n");
-					}
+					importName = importType.getNameWithoutPackage();
 				}
-				searchContent = builder.toString();
+				if (importName == null || importName.isBlank()) {
+					continue;
+				}
+				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
+				if (range == null) {
+					continue;
+				}
+				if (isImportNameUsed(searchContent, importName, importType)) {
+					continue;
+				}
+				Diagnostic diagnostic = new Diagnostic();
+				diagnostic.setRange(range);
+				diagnostic.setSeverity(DiagnosticSeverity.Warning);
+				diagnostic.setMessage("Unused import: " + importName);
+				diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
 			}
-			Pattern pattern = Pattern.compile("\\b" + Pattern.quote(importName) + "\\b");
-			if (pattern.matcher(searchContent).find()) {
-				continue;
-			}
-			Diagnostic diagnostic = new Diagnostic();
-			diagnostic.setRange(range);
-			diagnostic.setSeverity(DiagnosticSeverity.Warning);
-			diagnostic.setMessage("Unused import: " + importName);
-			diagnosticsByFile.computeIfAbsent(uri, key -> new ArrayList<>()).add(diagnostic);
 		}
+	}
+
+	private boolean isImportNameUsed(String contents, String importName, ClassNode importType) {
+		if (contents == null || importName == null || importName.isBlank()) {
+			return false;
+		}
+		Pattern pattern = Pattern.compile("(?<!\\w)" + Pattern.quote(importName) + "(?!\\w)");
+		if (pattern.matcher(contents).find()) {
+			return true;
+		}
+		if (importType == null) {
+			return false;
+		}
+		String fullName = importType.getName();
+		if (fullName == null || fullName.isBlank() || fullName.equals(importName)) {
+			return false;
+		}
+		Pattern qualifiedPattern = Pattern.compile("(?<!\\w)" + Pattern.quote(fullName) + "(?!\\w)");
+		return qualifiedPattern.matcher(contents).find();
 	}
 
 	private boolean isClassName(String name, ASTNodeVisitor visitor) {
