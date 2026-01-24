@@ -59,7 +59,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - Local variable type inference
   - Method return type inference
   - Generic type parameter inference
-  - Collection literal type inference
+  - [x] Collection literal type inference
   
 - [ ] **Null safety analysis**
   - `@NotNull` / `@Nullable` annotation support

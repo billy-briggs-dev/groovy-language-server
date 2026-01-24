@@ -31,6 +31,7 @@ import org.codehaus.groovy.ast.AnnotationNode;
 import org.codehaus.groovy.ast.ClassHelper;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.FieldNode;
+import org.codehaus.groovy.ast.GenericsType;
 import org.codehaus.groovy.ast.ImportNode;
 import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.ModuleNode;
@@ -46,6 +47,9 @@ import org.codehaus.groovy.ast.expr.DeclarationExpression;
 import org.codehaus.groovy.ast.expr.Expression;
 import org.codehaus.groovy.ast.expr.GStringExpression;
 import org.codehaus.groovy.ast.expr.ClosureExpression;
+import org.codehaus.groovy.ast.expr.ListExpression;
+import org.codehaus.groovy.ast.expr.MapEntryExpression;
+import org.codehaus.groovy.ast.expr.MapExpression;
 import org.codehaus.groovy.ast.expr.MethodCall;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
@@ -362,10 +366,16 @@ public class GroovyASTUtils {
             String opText = binaryExpr.getOperation().getText();
             if (opText != null && opText.contains("[")) {
                 ClassNode leftType = leftExpr.getType();
-                if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE) {
+                boolean needsGenericResolution = leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+                        || leftType.getGenericsTypes() == null || leftType.getGenericsTypes().length == 0;
+                if (needsGenericResolution) {
                     ASTNode defNode = GroovyASTUtils.getDefinition(leftExpr, false, astVisitor);
                     if (defNode != null) {
-                        leftType = getTypeOfNode(defNode, astVisitor);
+                        ClassNode defType = getTypeOfNode(defNode, astVisitor);
+                        if (defType != null && (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+                                || defType.getGenericsTypes() != null && defType.getGenericsTypes().length > 0)) {
+                            leftType = defType;
+                        }
                     }
                 }
                 if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE)
@@ -395,11 +405,44 @@ public class GroovyASTUtils {
                 }
                 if (leftType != null && leftType.getGenericsTypes() != null
                         && leftType.getGenericsTypes().length > 0) {
-                    return leftType.getGenericsTypes()[0].getType();
+                    GenericsType[] generics = leftType.getGenericsTypes();
+                    if ((ClassHelper.MAP_TYPE.equals(leftType) || leftType.implementsInterface(ClassHelper.MAP_TYPE))
+                            && generics.length > 1) {
+                        return generics[1].getType();
+                    }
+                    return generics[0].getType();
                 }
             }
         } else if (node instanceof GStringExpression) {
             return ClassHelper.STRING_TYPE;
+        } else if (node instanceof ListExpression) {
+            ListExpression expression = (ListExpression) node;
+            ClassNode elementType = inferCommonType(expression.getExpressions(), astVisitor);
+            ClassNode listType = ClassHelper.LIST_TYPE.getPlainNodeReference();
+            if (elementType != null) {
+                listType.setGenericsTypes(new GenericsType[] { new GenericsType(elementType) });
+            }
+            return listType;
+        } else if (node instanceof MapExpression) {
+            MapExpression expression = (MapExpression) node;
+            List<MapEntryExpression> entries = expression.getMapEntryExpressions();
+            List<Expression> keyExpressions = new ArrayList<>();
+            List<Expression> valueExpressions = new ArrayList<>();
+            for (MapEntryExpression entry : entries) {
+                if (entry.getKeyExpression() != null) {
+                    keyExpressions.add(entry.getKeyExpression());
+                }
+                if (entry.getValueExpression() != null) {
+                    valueExpressions.add(entry.getValueExpression());
+                }
+            }
+            ClassNode keyType = inferCommonType(keyExpressions, astVisitor);
+            ClassNode valueType = inferCommonType(valueExpressions, astVisitor);
+            ClassNode mapType = ClassHelper.MAP_TYPE.getPlainNodeReference();
+            if (keyType != null && valueType != null) {
+                mapType.setGenericsTypes(new GenericsType[] { new GenericsType(keyType), new GenericsType(valueType) });
+            }
+            return mapType;
         } else if (node instanceof ClassExpression) {
             ClassExpression expression = (ClassExpression) node;
             // This means it's an expression like this: SomeClass.someProp
@@ -464,6 +507,27 @@ public class GroovyASTUtils {
             return expression.getType();
         }
         return null;
+    }
+
+    private static ClassNode inferCommonType(List<Expression> expressions, ASTNodeVisitor astVisitor) {
+        if (expressions == null || expressions.isEmpty()) {
+            return ClassHelper.OBJECT_TYPE;
+        }
+        ClassNode commonType = null;
+        for (Expression expression : expressions) {
+            ClassNode expressionType = getTypeOfNode(expression, astVisitor);
+            if (expressionType == null) {
+                continue;
+            }
+            if (commonType == null) {
+                commonType = expressionType;
+                continue;
+            }
+            if (!commonType.equals(expressionType)) {
+                return ClassHelper.OBJECT_TYPE;
+            }
+        }
+        return commonType != null ? commonType : ClassHelper.OBJECT_TYPE;
     }
 
     private static ClassNode resolveDelegatesToType(ASTNode node, ASTNodeVisitor astVisitor) {
