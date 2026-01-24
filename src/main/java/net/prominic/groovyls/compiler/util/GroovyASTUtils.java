@@ -55,6 +55,7 @@ import org.codehaus.groovy.ast.expr.MapExpression;
 import org.codehaus.groovy.ast.expr.MethodCall;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
+import org.codehaus.groovy.ast.expr.StaticMethodCallExpression;
 import org.codehaus.groovy.ast.expr.VariableExpression;
 import org.codehaus.groovy.ast.stmt.BlockStatement;
 import org.codehaus.groovy.ast.stmt.ExpressionStatement;
@@ -462,7 +463,26 @@ public class GroovyASTUtils {
         } else if (node instanceof ClassExpression) {
             ClassExpression expression = (ClassExpression) node;
             // This means it's an expression like this: SomeClass.someProp
-            return expression.getType();
+            ClassNode type = expression.getType();
+            if (type != null && type.redirect() == ClassHelper.CLASS_Type && type.getGenericsTypes() != null
+                    && type.getGenericsTypes().length > 0) {
+                ClassNode genericType = type.getGenericsTypes()[0].getType();
+                if (genericType != null) {
+                    return astVisitor != null ? tryToResolveOriginalClassNode(genericType, false, astVisitor)
+                            : genericType;
+                }
+            }
+            if (type != null && astVisitor != null) {
+                ClassNode resolved = tryToResolveOriginalClassNode(type, false, astVisitor);
+                if (resolved != null) {
+                    return resolved;
+                }
+                ClassNode byName = findClassNodeByName(expression.getText(), astVisitor);
+                if (byName != null) {
+                    return byName;
+                }
+            }
+            return type;
         } else if (node instanceof ConstructorCallExpression) {
             ConstructorCallExpression expression = (ConstructorCallExpression) node;
             return expression.getType();
@@ -860,19 +880,31 @@ public class GroovyASTUtils {
         }
         ClosureExpression closure = (ClosureExpression) closureNode;
         ASTNode enclosingCall = getEnclosingNodeOfType(closure, MethodCallExpression.class, astVisitor);
-        if (!(enclosingCall instanceof MethodCallExpression)) {
-            return null;
+        MethodNode method = null;
+        ClassNode dslFallback = null;
+        int index = -1;
+        if (enclosingCall instanceof MethodCallExpression) {
+            MethodCallExpression call = (MethodCallExpression) enclosingCall;
+            method = getMethodFromCallExpression(call, astVisitor);
+            if (method == null) {
+                method = resolveMethodByName(call, astVisitor);
+            }
+            dslFallback = resolveDslMarkerType(call, astVisitor);
+            index = findClosureArgumentIndex(call, closure);
+        } else {
+            ASTNode enclosingStaticCall = getEnclosingNodeOfType(closure, StaticMethodCallExpression.class,
+                    astVisitor);
+            if (!(enclosingStaticCall instanceof StaticMethodCallExpression)) {
+                return null;
+            }
+            StaticMethodCallExpression call = (StaticMethodCallExpression) enclosingStaticCall;
+            method = resolveStaticMethodByName(call);
+            dslFallback = resolveDslMarkerType(call, astVisitor);
+            index = findClosureArgumentIndex(call, closure);
         }
-        MethodCallExpression call = (MethodCallExpression) enclosingCall;
-        MethodNode method = getMethodFromCallExpression(call, astVisitor);
-        if (method == null) {
-            method = resolveMethodByName(call, astVisitor);
-        }
-        ClassNode dslFallback = resolveDslMarkerType(call, astVisitor);
         if (method == null) {
             return dslFallback;
         }
-        int index = findClosureArgumentIndex(call, closure);
         if (index < 0) {
             index = findClosureParameterIndex(method);
         }
@@ -905,6 +937,33 @@ public class GroovyASTUtils {
             return resolved;
         }
         return findDslMarkerClassType(call, astVisitor);
+    }
+
+    private static ClassNode resolveDslMarkerType(StaticMethodCallExpression call, ASTNodeVisitor astVisitor) {
+        if (call == null || astVisitor == null) {
+            return null;
+        }
+        String methodName = call.getMethod();
+        if (methodName == null) {
+            return null;
+        }
+        ClassNode owner = call.getOwnerType();
+        if (owner == null) {
+            return null;
+        }
+        for (MethodNode candidate : owner.getMethods(methodName)) {
+            if (!candidate.isStatic()) {
+                continue;
+            }
+            ClassNode resolved = resolveDslMarkerTypeFromMethod(candidate);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+        if (hasAnnotation(owner, DSL_MARKER_ANNOTATIONS)) {
+            return owner;
+        }
+        return null;
     }
 
     private static ClassNode findDslMarkerOwnerType(MethodCallExpression call, ASTNodeVisitor astVisitor,
@@ -1053,6 +1112,19 @@ public class GroovyASTUtils {
         return -1;
     }
 
+    private static int findClosureArgumentIndex(StaticMethodCallExpression call, ClosureExpression closure) {
+        if (call.getArguments() instanceof ArgumentListExpression) {
+            ArgumentListExpression args = (ArgumentListExpression) call.getArguments();
+            List<Expression> expressions = args.getExpressions();
+            for (int i = 0; i < expressions.size(); i++) {
+                if (expressions.get(i) == closure) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
     private static int findClosureParameterIndex(MethodNode method) {
         Parameter[] params = method.getParameters();
         for (int i = 0; i < params.length; i++) {
@@ -1092,6 +1164,26 @@ public class GroovyASTUtils {
         boolean statics = call.getObjectExpression() instanceof ClassExpression;
         for (MethodNode method : owner.getMethods(methodName)) {
             if (statics == method.isStatic()) {
+                return method;
+            }
+        }
+        return owner.getMethods(methodName).stream().findFirst().orElse(null);
+    }
+
+    private static MethodNode resolveStaticMethodByName(StaticMethodCallExpression call) {
+        if (call == null) {
+            return null;
+        }
+        String methodName = call.getMethod();
+        if (methodName == null) {
+            return null;
+        }
+        ClassNode owner = call.getOwnerType();
+        if (owner == null) {
+            return null;
+        }
+        for (MethodNode method : owner.getMethods(methodName)) {
+            if (method.isStatic()) {
                 return method;
             }
         }
