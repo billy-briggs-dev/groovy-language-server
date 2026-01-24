@@ -33,6 +33,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -80,6 +84,7 @@ import org.eclipse.lsp4j.TypeDefinitionParams;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
+import org.eclipse.lsp4j.WorkspaceSymbol;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
@@ -103,11 +108,14 @@ import net.prominic.groovyls.providers.SignatureHelpProvider;
 import net.prominic.groovyls.providers.TypeDefinitionProvider;
 import net.prominic.groovyls.providers.WorkspaceSymbolProvider;
 import net.prominic.groovyls.util.FileContentsTracker;
+import net.prominic.groovyls.util.GradleProjectDetector;
+import net.prominic.groovyls.util.GradleProjectInfo;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 import net.prominic.lsp.utils.Positions;
 
 public class GroovyServices implements TextDocumentService, WorkspaceService, LanguageClientAware {
 	private static final Pattern PATTERN_CONSTRUCTOR_CALL = Pattern.compile(".*new \\w*$");
+	private static final long DIAGNOSTIC_DEBOUNCE_MS = 250;
 
 	private LanguageClient languageClient;
 
@@ -120,6 +128,15 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private ScanResult classGraphScanResult = null;
 	private GroovyClassLoader classLoader = null;
 	private URI previousContext = null;
+	private GradleProjectInfo gradleProjectInfo;
+	private final ScheduledExecutorService compileScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+		Thread thread = new Thread(r, "groovyls-compile");
+		thread.setDaemon(true);
+		return thread;
+	});
+	private final Object compileLock = new Object();
+	private ScheduledFuture<?> pendingCompile;
+	private URI pendingContextUri;
 
 	public GroovyServices(ICompilationUnitFactory factory) {
 		compilationUnitFactory = factory;
@@ -128,6 +145,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	public void setWorkspaceRoot(Path workspaceRoot) {
 		this.workspaceRoot = workspaceRoot;
 		createOrUpdateCompilationUnit();
+		detectGradleProject();
 	}
 
 	@Override
@@ -141,21 +159,21 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	public void didOpen(DidOpenTextDocumentParams params) {
 		fileContentsTracker.didOpen(params);
 		URI uri = URI.create(params.getTextDocument().getUri());
-		compileAndVisitAST(uri);
+		scheduleCompileAndVisitAST(uri);
 	}
 
 	@Override
 	public void didChange(DidChangeTextDocumentParams params) {
 		fileContentsTracker.didChange(params);
 		URI uri = URI.create(params.getTextDocument().getUri());
-		compileAndVisitAST(uri);
+		scheduleCompileAndVisitAST(uri);
 	}
 
 	@Override
 	public void didClose(DidCloseTextDocumentParams params) {
 		fileContentsTracker.didClose(params);
 		URI uri = URI.create(params.getTextDocument().getUri());
-		compileAndVisitAST(uri);
+		scheduleCompileAndVisitAST(uri);
 	}
 
 	@Override
@@ -165,6 +183,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	@Override
 	public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
+		detectGradleProject();
 		boolean isSameUnit = createOrUpdateCompilationUnit();
 		Set<URI> urisWithChanges = params.getChanges().stream().map(fileEvent -> URI.create(fileEvent.getUri()))
 				.collect(Collectors.toSet());
@@ -213,7 +232,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	@Override
 	public CompletableFuture<Hover> hover(HoverParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		HoverProvider provider = new HoverProvider(astVisitor);
 		return provider.provideHover(params.getTextDocument(), params.getPosition());
@@ -225,7 +244,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		Position position = params.getPosition();
 		URI uri = URI.create(textDocument.getUri());
 
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		String originalSource = null;
 		ASTNode offsetNode = astVisitor.getNodeAtLineAndColumn(uri, position.getLine(), position.getCharacter());
@@ -252,7 +271,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			// will correctly create a PropertyExpression to use for completion.
 			// we'll restore the original text after we're done handling the
 			// completion request.
-			didChange(didChangeParams);
+			applyDidChangeAndCompileNow(didChangeParams);
 		}
 
 		CompletableFuture<Either<List<CompletionItem>, CompletionList>> result = null;
@@ -267,7 +286,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 						originalSource);
 				DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 						Collections.singletonList(changeEvent));
-				didChange(didChangeParams);
+				applyDidChangeAndCompileNow(didChangeParams);
 			}
 		}
 
@@ -278,7 +297,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> definition(
 			DefinitionParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		DefinitionProvider provider = new DefinitionProvider(astVisitor);
 		return provider.provideDefinition(params.getTextDocument(), params.getPosition());
@@ -290,7 +309,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		Position position = params.getPosition();
 		URI uri = URI.create(textDocument.getUri());
 
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		String originalSource = null;
 		ASTNode offsetNode = astVisitor.getNodeAtLineAndColumn(uri, position.getLine(), position.getCharacter());
@@ -310,7 +329,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			// signature help.
 			// we'll restore the original text after we're done handling the
 			// signature help request.
-			didChange(didChangeParams);
+			applyDidChangeAndCompileNow(didChangeParams);
 		}
 
 		try {
@@ -324,7 +343,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 						originalSource);
 				DidChangeTextDocumentParams didChangeParams = new DidChangeTextDocumentParams(versionedTextDocument,
 						Collections.singletonList(changeEvent));
-				didChange(didChangeParams);
+				applyDidChangeAndCompileNow(didChangeParams);
 			}
 		}
 	}
@@ -333,7 +352,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> typeDefinition(
 			TypeDefinitionParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		TypeDefinitionProvider provider = new TypeDefinitionProvider(astVisitor);
 		return provider.provideTypeDefinition(params.getTextDocument(), params.getPosition());
@@ -342,7 +361,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	@Override
 	public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		ReferenceProvider provider = new ReferenceProvider(astVisitor);
 		return provider.provideReferences(params.getTextDocument(), params.getPosition());
@@ -352,22 +371,24 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	public CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> documentSymbol(
 			DocumentSymbolParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		DocumentSymbolProvider provider = new DocumentSymbolProvider(astVisitor);
 		return provider.provideDocumentSymbols(params.getTextDocument());
 	}
 
 	@Override
-	public CompletableFuture<List<? extends SymbolInformation>> symbol(WorkspaceSymbolParams params) {
+	public CompletableFuture<Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>>> symbol(
+			WorkspaceSymbolParams params) {
+		ensureAstAvailable();
 		WorkspaceSymbolProvider provider = new WorkspaceSymbolProvider(astVisitor);
-		return provider.provideWorkspaceSymbols(params.getQuery());
+		return provider.provideWorkspaceSymbols(params.getQuery()).thenApply(Either::forLeft);
 	}
 
 	@Override
 	public CompletableFuture<WorkspaceEdit> rename(RenameParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
-		recompileIfContextChanged(uri);
+		ensureCompiledForRequest(uri);
 
 		RenameProvider provider = new RenameProvider(astVisitor, fileContentsTracker);
 		return provider.provideRename(params);
@@ -445,7 +466,46 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		compileAndVisitAST(newContext);
 	}
 
+	private void ensureCompiledForRequest(URI contextURI) {
+		if (contextURI == null) {
+			return;
+		}
+		boolean shouldCompileNow = false;
+		synchronized (compileLock) {
+			if (pendingCompile != null) {
+				pendingCompile.cancel(false);
+				pendingCompile = null;
+				shouldCompileNow = true;
+			}
+		}
+		if (astVisitor == null || compilationUnit == null || shouldCompileNow) {
+			compileAndVisitAST(contextURI);
+			return;
+		}
+		recompileIfContextChanged(contextURI);
+	}
+
+	private void ensureAstAvailable() {
+		if (astVisitor != null) {
+			return;
+		}
+		if (createOrUpdateCompilationUnit()) {
+			compile();
+			visitAST();
+		} else if (compilationUnit != null) {
+			compile();
+			visitAST();
+		}
+	}
+
+	private void detectGradleProject() {
+		gradleProjectInfo = GradleProjectDetector.detect(workspaceRoot);
+	}
+
 	private void compileAndVisitAST(URI contextURI) {
+		if (contextURI == null) {
+			return;
+		}
 		Set<URI> uris = Collections.singleton(contextURI);
 		boolean isSameUnit = createOrUpdateCompilationUnit();
 		compile();
@@ -455,6 +515,29 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			visitAST();
 		}
 		previousContext = contextURI;
+	}
+
+	private void scheduleCompileAndVisitAST(URI contextURI) {
+		synchronized (compileLock) {
+			pendingContextUri = contextURI;
+			if (pendingCompile != null) {
+				pendingCompile.cancel(false);
+			}
+			pendingCompile = compileScheduler.schedule(() -> {
+				URI uriToCompile;
+				synchronized (compileLock) {
+					uriToCompile = pendingContextUri;
+					pendingCompile = null;
+				}
+				compileAndVisitAST(uriToCompile);
+			}, DIAGNOSTIC_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+		}
+	}
+
+	private void applyDidChangeAndCompileNow(DidChangeTextDocumentParams params) {
+		fileContentsTracker.didChange(params);
+		URI uri = URI.create(params.getTextDocument().getUri());
+		compileAndVisitAST(uri);
 	}
 
 	private void compile() {
@@ -498,8 +581,21 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 						diagnostic.setRange(range);
 						diagnostic.setSeverity(cause.isFatal() ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning);
 						diagnostic.setMessage(cause.getMessage());
-						URI uri = Paths.get(cause.getSourceLocator()).toUri();
-						diagnosticsByFile.computeIfAbsent(uri, (key) -> new ArrayList<>()).add(diagnostic);
+						URI uri = null;
+						try {
+							String sourceLocator = cause.getSourceLocator();
+							if (sourceLocator != null && !sourceLocator.isBlank()) {
+								uri = Paths.get(sourceLocator).toUri();
+							}
+						} catch (Exception e) {
+							// ignore malformed source locators
+						}
+						if (uri == null) {
+							uri = previousContext;
+						}
+						if (uri != null) {
+							diagnosticsByFile.computeIfAbsent(uri, (key) -> new ArrayList<>()).add(diagnostic);
+						}
 					});
 		}
 
