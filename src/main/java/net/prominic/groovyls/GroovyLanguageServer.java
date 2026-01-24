@@ -34,6 +34,7 @@ import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.ServerCapabilities;
 import org.eclipse.lsp4j.SignatureHelpOptions;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
+import org.eclipse.lsp4j.WorkspaceFolder;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
@@ -70,10 +71,14 @@ public class GroovyLanguageServer implements LanguageServer, LanguageClientAware
 
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
-        String rootUriString = params.getRootUri();
-        if (rootUriString != null) {
-            URI uri = URI.create(params.getRootUri());
-            Path workspaceRoot = Paths.get(uri);
+        Path workspaceRoot = null;
+        if (params.getWorkspaceFolders() != null && !params.getWorkspaceFolders().isEmpty()) {
+            WorkspaceFolder folder = params.getWorkspaceFolders().get(0);
+            if (folder != null && folder.getUri() != null) {
+                workspaceRoot = Paths.get(URI.create(folder.getUri()));
+            }
+        }
+        if (workspaceRoot != null) {
             groovyServices.setWorkspaceRoot(workspaceRoot);
         }
 
@@ -89,6 +94,8 @@ public class GroovyLanguageServer implements LanguageServer, LanguageClientAware
         serverCapabilities.setTypeDefinitionProvider(true);
         serverCapabilities.setHoverProvider(true);
         serverCapabilities.setRenameProvider(true);
+        serverCapabilities.setDocumentFormattingProvider(true);
+        serverCapabilities.setDocumentRangeFormattingProvider(true);
         SignatureHelpOptions signatureHelpOptions = new SignatureHelpOptions();
         signatureHelpOptions.setTriggerCharacters(Arrays.asList("(", ","));
         serverCapabilities.setSignatureHelpProvider(signatureHelpOptions);
