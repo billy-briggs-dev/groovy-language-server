@@ -754,6 +754,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			}
 			importsByUri.computeIfAbsent(uri, key -> new ArrayList<>()).add(importNode);
 		}
+		Map<String, Pattern> patternCache = new HashMap<>();
 		for (Map.Entry<URI, List<ImportNode>> entry : importsByUri.entrySet()) {
 			URI uri = entry.getKey();
 			List<ImportNode> importNodes = entry.getValue();
@@ -770,7 +771,6 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				importLines.add(range.getStart().getLine());
 			}
 			String searchContent = removeImportLines(contents, importLines);
-			Map<String, Pattern> patternCache = new HashMap<>();
 			for (ImportNode importNode : importNodes) {
 				String importName = importNode.getAlias();
 				ClassNode importType = importNode.getType();
