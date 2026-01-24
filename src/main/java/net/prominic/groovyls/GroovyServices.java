@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,6 +50,7 @@ import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.control.CompilationFailedException;
 import org.codehaus.groovy.control.ErrorCollector;
 import org.codehaus.groovy.control.Phases;
+import org.codehaus.groovy.control.SourceUnit;
 import org.codehaus.groovy.control.messages.Message;
 import org.codehaus.groovy.control.messages.SyntaxErrorMessage;
 import org.codehaus.groovy.syntax.SyntaxException;
@@ -115,6 +117,16 @@ import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 import net.prominic.lsp.utils.Positions;
 
 public class GroovyServices implements TextDocumentService, WorkspaceService, LanguageClientAware {
+	private static class DiagnosticsResult {
+		private final Set<PublishDiagnosticsParams> diagnostics;
+		private final Set<URI> fatalErrorUris;
+
+		private DiagnosticsResult(Set<PublishDiagnosticsParams> diagnostics, Set<URI> fatalErrorUris) {
+			this.diagnostics = diagnostics;
+			this.fatalErrorUris = fatalErrorUris;
+		}
+	}
+
 	private static final Pattern PATTERN_CONSTRUCTOR_CALL = Pattern.compile(".*new \\w*$");
 	private static final long DIAGNOSTIC_DEBOUNCE_MS = 250;
 
@@ -573,12 +585,14 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			System.err.println("Unexpected exception in language server when compiling Groovy.");
 			e.printStackTrace(System.err);
 		}
-		Set<PublishDiagnosticsParams> diagnostics = handleErrorCollector(compilationUnit.getErrorCollector());
-		diagnostics.stream().forEach(languageClient::publishDiagnostics);
+		DiagnosticsResult diagnostics = handleErrorCollector(compilationUnit.getErrorCollector());
+		diagnostics.diagnostics.stream().forEach(languageClient::publishDiagnostics);
+		removeFatalErrorSources(diagnostics.fatalErrorUris);
 	}
 
-	private Set<PublishDiagnosticsParams> handleErrorCollector(ErrorCollector collector) {
+	private DiagnosticsResult handleErrorCollector(ErrorCollector collector) {
 		Map<URI, List<Diagnostic>> diagnosticsByFile = new HashMap<>();
+		Set<URI> fatalErrorUris = new HashSet<>();
 
 		List<? extends Message> errors = collector.getErrors();
 		if (errors != null) {
@@ -597,10 +611,12 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 						diagnostic.setSeverity(cause.isFatal() ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning);
 						diagnostic.setMessage(cause.getMessage());
 						URI uri = null;
+						boolean hasSourceLocator = false;
 						try {
 							String sourceLocator = cause.getSourceLocator();
 							if (sourceLocator != null && !sourceLocator.isBlank()) {
 								uri = Paths.get(sourceLocator).toUri();
+								hasSourceLocator = true;
 							}
 						} catch (Exception e) {
 							// ignore malformed source locators
@@ -610,6 +626,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 						}
 						if (uri != null) {
 							diagnosticsByFile.computeIfAbsent(uri, (key) -> new ArrayList<>()).add(diagnostic);
+							if (hasSourceLocator) {
+								fatalErrorUris.add(uri);
+							}
 						}
 					});
 		}
@@ -628,6 +647,27 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			}
 		}
 		prevDiagnosticsByFile = diagnosticsByFile;
-		return result;
+		return new DiagnosticsResult(result, fatalErrorUris);
+	}
+
+	private void removeFatalErrorSources(Set<URI> fatalErrorUris) {
+		if (compilationUnit == null || fatalErrorUris == null || fatalErrorUris.isEmpty()) {
+			return;
+		}
+		List<SourceUnit> sourcesToRemove = new ArrayList<>();
+		compilationUnit.iterator().forEachRemaining(sourceUnit -> {
+			URI uri = sourceUnit.getSource().getURI();
+			if (uri != null && fatalErrorUris.contains(uri)) {
+				sourcesToRemove.add(sourceUnit);
+			}
+		});
+		if (!sourcesToRemove.isEmpty()) {
+			compilationUnit.removeSources(sourcesToRemove);
+			try {
+				compilationUnit.compile(Phases.CANONICALIZATION);
+			} catch (Exception e) {
+				// ignore
+			}
+		}
 	}
 }
