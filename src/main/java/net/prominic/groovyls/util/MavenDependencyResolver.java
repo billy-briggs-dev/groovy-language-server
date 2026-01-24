@@ -20,6 +20,7 @@
 package net.prominic.groovyls.util;
 
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -30,14 +31,29 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 public final class MavenDependencyResolver {
     private static final String DEFAULT_REPO = "https://repo1.maven.org/maven2";
+    private static final Path CACHE_PATH = Paths.get(System.getProperty("user.home"), ".groovyls", "cache",
+            "maven-classpath.json");
+    private static final Object CACHE_LOCK = new Object();
+    private static final Gson GSON = new Gson();
+    private static final Map<String, CacheEntry> CACHE = new ConcurrentHashMap<>();
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
+
+    static {
+        loadCache();
+    }
 
     private MavenDependencyResolver() {
     }
@@ -51,6 +67,12 @@ public final class MavenDependencyResolver {
             repoList.addAll(repositories);
         } else {
             repoList.add(DEFAULT_REPO);
+        }
+
+        String cacheKey = buildCacheKey(dependencies, repoList);
+        CacheEntry cached = CACHE.get(cacheKey);
+        if (cached != null) {
+            return new ArrayList<>(cached.classpath);
         }
 
         Path localRepo = Paths.get(System.getProperty("user.home"), ".m2", "repository");
@@ -72,6 +94,8 @@ public final class MavenDependencyResolver {
                 resolved.add(artifactPath.toString());
             }
         }
+        CACHE.put(cacheKey, new CacheEntry(resolved));
+        saveCache();
         return resolved;
     }
 
@@ -105,6 +129,60 @@ public final class MavenDependencyResolver {
             }
         }
         return false;
+    }
+
+    private static String buildCacheKey(List<String> dependencies, List<String> repositories) {
+        String deps = String.join("|", dependencies == null ? Collections.emptyList() : dependencies);
+        String repos = String.join("|", repositories == null ? Collections.emptyList() : repositories);
+        return deps + "::" + repos;
+    }
+
+    private static void loadCache() {
+        synchronized (CACHE_LOCK) {
+            if (!Files.exists(CACHE_PATH)) {
+                return;
+            }
+            try {
+                String json = Files.readString(CACHE_PATH);
+                if (json == null || json.isBlank()) {
+                    return;
+                }
+                Type type = new TypeToken<Map<String, CacheEntry>>() {
+                }.getType();
+                Map<String, CacheEntry> data = GSON.fromJson(json, type);
+                if (data != null) {
+                    CACHE.putAll(data);
+                }
+            } catch (Exception e) {
+                // ignore cache load failures
+            }
+        }
+    }
+
+    private static void saveCache() {
+        synchronized (CACHE_LOCK) {
+            try {
+                Path parent = CACHE_PATH.getParent();
+                if (parent != null && !Files.exists(parent)) {
+                    Files.createDirectories(parent);
+                }
+                String json = GSON.toJson(new HashMap<>(CACHE));
+                Files.writeString(CACHE_PATH, json);
+            } catch (Exception e) {
+                // ignore cache save failures
+            }
+        }
+    }
+
+    private static final class CacheEntry {
+        private List<String> classpath;
+
+        private CacheEntry() {
+        }
+
+        private CacheEntry(List<String> classpath) {
+            this.classpath = classpath == null ? Collections.emptyList() : new ArrayList<>(classpath);
+        }
     }
 
     private static final class MavenCoordinate {

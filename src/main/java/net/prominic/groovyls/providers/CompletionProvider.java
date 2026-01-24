@@ -64,6 +64,8 @@ import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextEdit;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 
+import io.github.classgraph.ClassGraph;
+import io.github.classgraph.ClassGraphException;
 import io.github.classgraph.ClassInfo;
 import io.github.classgraph.PackageInfo;
 import io.github.classgraph.ScanResult;
@@ -77,6 +79,8 @@ import net.prominic.lsp.utils.Positions;
 public class CompletionProvider {
 	private static final Pattern METACLASS_METHOD_PATTERN = Pattern
 			.compile("([A-Za-z_][\\w\\.]*)\\.metaClass\\.([A-Za-z_][\\w]*)\\s*=\\s*\\{");
+	private static final Object SYSTEM_SCAN_LOCK = new Object();
+	private static volatile ScanResult SYSTEM_SCAN_RESULT;
 	private static final List<String> KEYWORDS = Arrays.asList(
 			"abstract", "as", "assert", "break", "case", "catch", "class", "continue", "def", "default",
 			"do", "else", "enum", "extends", "false", "final", "for", "if", "implements", "import",
@@ -180,6 +184,13 @@ public class CompletionProvider {
 				prefix = "";
 			}
 			populateItemsFromSourceMetaClassAssignments(prefix, items);
+		}
+
+		if (items.isEmpty()) {
+			String prefix = getIdentifierPrefixFromSource(position);
+			if (prefix != null && !prefix.isBlank()) {
+				populateClassGraphTypes(prefix, items);
+			}
 		}
 
 		items.forEach(item -> {
@@ -833,6 +844,63 @@ public class CompletionProvider {
 		items.addAll(classItems);
 	}
 
+	private void populateClassGraphTypes(String namePrefix, List<CompletionItem> items) {
+		ScanResult scanResult = classGraphScanResult;
+		if (scanResult == null) {
+			scanResult = getSystemScanResult(namePrefix);
+		}
+		if (scanResult == null) {
+			return;
+		}
+		Set<String> existingNames = collectExistingNames(items);
+		List<ClassInfo> classes = scanResult.getAllClasses();
+		List<CompletionItem> classItems = classes.stream().filter(classInfo -> {
+			if (isIncomplete) {
+				return false;
+			}
+			if (existingNames.size() >= maxItemCount) {
+				isIncomplete = true;
+				return false;
+			}
+			String className = classInfo.getName();
+			String classNameWithoutPackage = classInfo.getSimpleName();
+			if (classNameWithoutPackage.startsWith(namePrefix) && !existingNames.contains(className)) {
+				existingNames.add(className);
+				return true;
+			}
+			return false;
+		}).map(classInfo -> {
+			CompletionItem item = new CompletionItem();
+			item.setLabel(classInfo.getSimpleName());
+			item.setDetail(classInfo.getPackageName());
+			item.setKind(classInfoToCompletionItemKind(classInfo));
+			return item;
+		}).collect(Collectors.toList());
+		items.addAll(classItems);
+	}
+
+	private ScanResult getSystemScanResult(String namePrefix) {
+		if (SYSTEM_SCAN_RESULT != null) {
+			return SYSTEM_SCAN_RESULT;
+		}
+		synchronized (SYSTEM_SCAN_LOCK) {
+			if (SYSTEM_SCAN_RESULT != null) {
+				return SYSTEM_SCAN_RESULT;
+			}
+			try {
+				ClassGraph graph = new ClassGraph().enableClassInfo().enableSystemJarsAndModules()
+						.setMaxBufferedJarRAMSize(Integer.MAX_VALUE);
+				if (namePrefix != null && !namePrefix.isBlank()) {
+					graph = graph.acceptPackages("java.lang", "java.util");
+				}
+				SYSTEM_SCAN_RESULT = graph.scan();
+				return SYSTEM_SCAN_RESULT;
+			} catch (ClassGraphException e) {
+				return null;
+			}
+		}
+	}
+
 	private String getMemberName(String memberName, Range range, Position position) {
 		if (position.getLine() == range.getStart().getLine()
 				&& position.getCharacter() > range.getStart().getCharacter()) {
@@ -869,6 +937,41 @@ public class CompletionProvider {
 			return "";
 		}
 		return line.substring(lastDot + 1, column).trim();
+	}
+
+	private String getIdentifierPrefixFromSource(Position position) {
+		if (files == null || completionUri == null) {
+			return null;
+		}
+		String text = files.getContents(completionUri);
+		if (text == null) {
+			return null;
+		}
+		int offset = Positions.getOffset(text, position);
+		int lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1));
+		lineStart = lineStart == -1 ? 0 : lineStart + 1;
+		int lineEnd = text.indexOf('\n', offset);
+		if (lineEnd == -1) {
+			lineEnd = text.length();
+		}
+		String line = text.substring(lineStart, lineEnd);
+		int column = position.getCharacter();
+		if (column > line.length()) {
+			column = line.length();
+		}
+		int start = column;
+		while (start > 0) {
+			char ch = line.charAt(start - 1);
+			if (Character.isLetterOrDigit(ch) || ch == '_') {
+				start--;
+				continue;
+			}
+			break;
+		}
+		if (start == column) {
+			return "";
+		}
+		return line.substring(start, column).trim();
 	}
 
 	private boolean hasMemberAccessInSource(Position position) {

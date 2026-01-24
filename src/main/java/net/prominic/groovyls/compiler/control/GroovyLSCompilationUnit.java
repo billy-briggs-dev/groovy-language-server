@@ -73,4 +73,8 @@ public class GroovyLSCompilationUnit extends CompilationUnit {
 	public void removeSource(SourceUnit sourceUnit) {
 		removeSources(Collections.singletonList(sourceUnit));
 	}
+
+	public boolean hasPendingSources() {
+		return queuedSources != null && !queuedSources.isEmpty();
+	}
 }

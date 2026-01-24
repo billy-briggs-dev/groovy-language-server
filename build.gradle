@@ -14,6 +14,10 @@ tasks.withType(JavaCompile).configureEach {
 
 test {
   useJUnitPlatform()
+  maxParallelForks = Math.max(1, (int) (Runtime.runtime.availableProcessors() / 2))
+  forkEvery = 50
+  minHeapSize = "256m"
+  maxHeapSize = "1024m"
 }
 
 ext.mainClass = "net.prominic.groovyls.GroovyLanguageServer"

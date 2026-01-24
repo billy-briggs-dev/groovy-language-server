@@ -38,6 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -189,9 +190,19 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		thread.setDaemon(true);
 		return thread;
 	});
+	private final ScheduledExecutorService indexingScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+		Thread thread = new Thread(r, "groovyls-index");
+		thread.setDaemon(true);
+		return thread;
+	});
 	private final Object compileLock = new Object();
+	private final Object compileOperationLock = new Object();
+	private final Object classGraphLock = new Object();
+	private final AtomicInteger gradleIndexGeneration = new AtomicInteger();
+	private final AtomicInteger mavenIndexGeneration = new AtomicInteger();
+	private final AtomicInteger classGraphIndexGeneration = new AtomicInteger();
 	private ScheduledFuture<?> pendingCompile;
-	private URI pendingContextUri;
+	private final Set<URI> pendingContextUris = new HashSet<>();
 	private final FormattingSettings formattingSettings = new FormattingSettings();
 	private final FormattingProvider formattingProvider = new FormattingProvider(fileContentsTracker,
 			formattingSettings);
@@ -252,14 +263,16 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	@Override
 	public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
 		detectGradleProject();
-		boolean isSameUnit = createOrUpdateCompilationUnit();
-		Set<URI> urisWithChanges = params.getChanges().stream().map(fileEvent -> URI.create(fileEvent.getUri()))
-				.collect(Collectors.toSet());
-		compile();
-		if (isSameUnit) {
-			visitAST(urisWithChanges);
-		} else {
-			visitAST();
+		synchronized (compileOperationLock) {
+			boolean isSameUnit = createOrUpdateCompilationUnit();
+			Set<URI> urisWithChanges = params.getChanges().stream().map(fileEvent -> URI.create(fileEvent.getUri()))
+					.collect(Collectors.toSet());
+			compile();
+			if (isSameUnit) {
+				visitAST(urisWithChanges);
+			} else {
+				visitAST();
+			}
 		}
 	}
 
@@ -311,21 +324,23 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		compilationUnitFactory.setSourceRoots(sourceRoots);
 		compilationUnitFactory.setClasspathRecursive(classpathRecursive);
 
-		mavenClasspathList = MavenDependencyResolver.resolve(mavenDependencies, mavenRepositories);
-		applyEffectiveClasspath();
+		applyEffectiveClasspathAsync();
+		scheduleMavenIndexing();
 
 		boolean structureChanged = !prevExcludePatterns.equals(excludePatterns)
 				|| !prevSourceRoots.equals(sourceRoots)
 				|| prevClasspathRecursive != classpathRecursive;
 		if (structureChanged) {
-			boolean isSameUnit = createOrUpdateCompilationUnit();
-			compile();
-			if (isSameUnit) {
-				visitAST();
-			} else {
-				visitAST();
+			synchronized (compileOperationLock) {
+				boolean isSameUnit = createOrUpdateCompilationUnit();
+				compile();
+				if (isSameUnit) {
+					visitAST();
+				} else {
+					visitAST();
+				}
+				previousContext = null;
 			}
-			previousContext = null;
 		}
 	}
 
@@ -395,6 +410,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	public CompletableFuture<Hover> hover(HoverParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
 		ensureCompiledForRequest(uri);
+		ensureClassGraphAvailable();
 
 		HoverProvider provider = new HoverProvider(astVisitor);
 		return provider.provideHover(params.getTextDocument(), params.getPosition());
@@ -611,15 +627,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			GroovyClassLoader newClassLoader = compilationUnit.getClassLoader();
 			if (!newClassLoader.equals(classLoader)) {
 				classLoader = newClassLoader;
-
-				try {
-					classGraphScanResult = new ClassGraph().overrideClassLoaders(classLoader).enableClassInfo()
-							.enableSystemJarsAndModules()
-							.setMaxBufferedJarRAMSize(Integer.MAX_VALUE)
-							.scan();
-				} catch (ClassGraphException e) {
-					classGraphScanResult = null;
-				}
+				scheduleClassGraphScan(classLoader);
 			}
 		} else {
 			classGraphScanResult = null;
@@ -633,7 +641,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			return;
 		}
 		fileContentsTracker.forceChanged(newContext);
-		compileAndVisitAST(newContext);
+		compileAndVisitAST(Collections.singleton(newContext));
 	}
 
 	private void ensureCompiledForRequest(URI contextURI) {
@@ -648,8 +656,9 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				shouldCompileNow = true;
 			}
 		}
-		if (astVisitor == null || compilationUnit == null || shouldCompileNow) {
-			compileAndVisitAST(contextURI);
+		boolean hasAstForUri = astVisitor != null && !astVisitor.getNodes(contextURI).isEmpty();
+		if (astVisitor == null || compilationUnit == null || shouldCompileNow || !hasAstForUri) {
+			compileAndVisitAST(Collections.singleton(contextURI));
 			return;
 		}
 		recompileIfContextChanged(contextURI);
@@ -659,66 +668,149 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		if (astVisitor != null) {
 			return;
 		}
-		if (createOrUpdateCompilationUnit()) {
-			compile();
-			visitAST();
-		} else if (compilationUnit != null) {
-			compile();
-			visitAST();
+		synchronized (compileOperationLock) {
+			if (createOrUpdateCompilationUnit()) {
+				compile();
+				visitAST();
+			} else if (compilationUnit != null) {
+				compile();
+				visitAST();
+			}
 		}
 	}
 
 	private void detectGradleProject() {
-		gradleProjectInfo = GradleProjectDetector.detect(workspaceRoot);
-		gradleClasspathList = GradleClasspathResolver.resolve(gradleProjectInfo);
-		applyEffectiveClasspath();
+		scheduleGradleIndexing();
+	}
+
+	private void scheduleGradleIndexing() {
+		final int generation = gradleIndexGeneration.incrementAndGet();
+		indexingScheduler.execute(() -> {
+			GradleProjectInfo nextProjectInfo = GradleProjectDetector.detect(workspaceRoot);
+			List<String> nextClasspath = GradleClasspathResolver.resolve(nextProjectInfo);
+			if (gradleIndexGeneration.get() != generation) {
+				return;
+			}
+			gradleProjectInfo = nextProjectInfo;
+			gradleClasspathList = nextClasspath;
+			applyEffectiveClasspathAsync();
+		});
+	}
+
+	private void scheduleMavenIndexing() {
+		final int generation = mavenIndexGeneration.incrementAndGet();
+		List<String> deps = new ArrayList<>(mavenDependencies);
+		List<String> repos = new ArrayList<>(mavenRepositories);
+		indexingScheduler.execute(() -> {
+			List<String> resolved = MavenDependencyResolver.resolve(deps, repos);
+			if (mavenIndexGeneration.get() != generation) {
+				return;
+			}
+			mavenClasspathList = resolved;
+			applyEffectiveClasspathAsync();
+		});
+	}
+
+	private void scheduleClassGraphScan(GroovyClassLoader loader) {
+		final int generation = classGraphIndexGeneration.incrementAndGet();
+		indexingScheduler.execute(() -> {
+			ScanResult scanResult = null;
+			try {
+				scanResult = new ClassGraph().overrideClassLoaders(loader).enableClassInfo()
+						.enableSystemJarsAndModules()
+						.setMaxBufferedJarRAMSize(Integer.MAX_VALUE)
+						.scan();
+			} catch (ClassGraphException e) {
+				scanResult = null;
+			}
+			if (classGraphIndexGeneration.get() != generation) {
+				if (scanResult != null) {
+					scanResult.close();
+				}
+				return;
+			}
+			ScanResult previous = classGraphScanResult;
+			classGraphScanResult = scanResult;
+			if (previous != null) {
+				previous.close();
+			}
+		});
+	}
+
+	private void ensureClassGraphAvailable() {
+		if (classGraphScanResult != null) {
+			return;
+		}
+		synchronized (classGraphLock) {
+			if (classGraphScanResult != null) {
+				return;
+			}
+			if (classLoader != null) {
+				scheduleClassGraphScan(classLoader);
+			}
+		}
+	}
+
+	private void applyEffectiveClasspathAsync() {
+		compileScheduler.execute(this::applyEffectiveClasspath);
 	}
 
 	private void applyEffectiveClasspath() {
-		List<String> merged = GradleClasspathResolver.mergeClasspath(userClasspathList, gradleClasspathList);
-		merged = GradleClasspathResolver.mergeClasspath(merged, mavenClasspathList);
-		List<String> existing = compilationUnitFactory.getAdditionalClasspathList();
-		if (existing == null) {
-			existing = Collections.emptyList();
-		}
-		if (!merged.equals(existing)) {
-			compilationUnitFactory.setAdditionalClasspathList(merged);
+		synchronized (compileOperationLock) {
+			List<String> merged = GradleClasspathResolver.mergeClasspath(userClasspathList, gradleClasspathList);
+			merged = GradleClasspathResolver.mergeClasspath(merged, mavenClasspathList);
+			List<String> existing = compilationUnitFactory.getAdditionalClasspathList();
+			if (existing == null) {
+				existing = Collections.emptyList();
+			}
+			if (!merged.equals(existing)) {
+				compilationUnitFactory.setAdditionalClasspathList(merged);
 
-			createOrUpdateCompilationUnit();
-			compile();
-			visitAST();
-			previousContext = null;
+				createOrUpdateCompilationUnit();
+				compile();
+				visitAST();
+				previousContext = null;
+			}
 		}
 	}
 
-	private void compileAndVisitAST(URI contextURI) {
-		if (contextURI == null) {
+	private void compileAndVisitAST(Set<URI> contextURIs) {
+		if (contextURIs == null || contextURIs.isEmpty()) {
 			return;
 		}
-		Set<URI> uris = Collections.singleton(contextURI);
-		boolean isSameUnit = createOrUpdateCompilationUnit();
-		compile();
-		if (isSameUnit) {
-			visitAST(uris);
-		} else {
-			visitAST();
+		synchronized (compileOperationLock) {
+			boolean hadChanges = !fileContentsTracker.getChangedURIs().isEmpty();
+			boolean isSameUnit = createOrUpdateCompilationUnit();
+			boolean shouldCompile = compilationUnit != null
+					&& (compilationUnit.hasPendingSources() || astVisitor == null || hadChanges);
+			if (shouldCompile) {
+				compile();
+			}
+			if (isSameUnit && contextURIs != null && !contextURIs.isEmpty()) {
+				visitAST(contextURIs);
+			} else {
+				visitAST();
+			}
+			previousContext = contextURIs.iterator().next();
 		}
-		previousContext = contextURI;
 	}
 
 	private void scheduleCompileAndVisitAST(URI contextURI) {
 		synchronized (compileLock) {
-			pendingContextUri = contextURI;
+			if (contextURI != null) {
+				pendingContextUris.add(contextURI);
+			}
 			if (pendingCompile != null) {
 				pendingCompile.cancel(false);
 			}
 			pendingCompile = compileScheduler.schedule(() -> {
-				URI uriToCompile;
+				Set<URI> urisToCompile;
 				synchronized (compileLock) {
-					uriToCompile = pendingContextUri;
+					urisToCompile = new HashSet<>(pendingContextUris);
+					pendingContextUris.clear();
 					pendingCompile = null;
 				}
-				compileAndVisitAST(uriToCompile);
+				compileAndVisitAST(urisToCompile);
 			}, DIAGNOSTIC_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
 		}
 	}
@@ -726,7 +818,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private void applyDidChangeAndCompileNow(DidChangeTextDocumentParams params) {
 		fileContentsTracker.didChange(params);
 		URI uri = URI.create(params.getTextDocument().getUri());
-		compileAndVisitAST(uri);
+		compileAndVisitAST(Collections.singleton(uri));
 	}
 
 	private void compile() {
