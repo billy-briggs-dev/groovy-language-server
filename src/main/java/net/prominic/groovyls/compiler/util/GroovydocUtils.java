@@ -27,12 +27,14 @@ import java.util.regex.Pattern;
 import groovy.lang.groovydoc.Groovydoc;
 
 public class GroovydocUtils {
+	// Matches inline tag bodies with optional single-level nested braces.
 	private static final String INLINE_TAG_BODY_PATTERN = "[^{}]*(?:\\{[^{}]*\\}[^{}]*)*";
 	private static final Pattern INLINE_TAG_PATTERN = Pattern
 			.compile("\\{@(link|linkplain|code|literal)\\s+(" + INLINE_TAG_BODY_PATTERN + ")\\}");
 	private static final Pattern HTML_LINK_PATTERN = Pattern.compile("<a\\s+href=(\"|')(.*?)\\1\\s*>(.*?)</a>",
 			Pattern.CASE_INSENSITIVE);
 	private static final Pattern LINK_PARTS_PATTERN = Pattern.compile("([^\\s]+)(?:\\s+(.+))?");
+	// Matches fully-qualified class names, e.g. com.example.MyClass.
 	private static final Pattern CLASS_REFERENCE_PATTERN = Pattern
 			.compile("[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)+");
 	private static final String GROOVYDOC_BASE_URL = "https://docs.groovy-lang.org/latest/html/api/";
@@ -100,6 +102,7 @@ public class GroovydocUtils {
 	private static String reformatLine(String line) {
 		line = replaceInlineTags(line);
 		line = replaceHtmlLinks(line);
+		// Handle combined <pre><code> before standalone <pre> tags.
 		line = line.replaceAll("(?i)<pre>\\s*<code>", "\n\n```\n");
 		line = line.replaceAll("(?i)</code>\\s*</pre>", "\n```\n");
 		line = line.replaceAll("(?i)<pre>", "\n\n```\n");
