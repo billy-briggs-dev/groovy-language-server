@@ -127,6 +127,18 @@ public class CompilationUnitFactory implements ICompilationUnitFactory {
 	}
 
 	protected void getClasspathList(List<String> result) {
+		try {
+			java.net.URL location = CompilationUnitFactory.class.getProtectionDomain().getCodeSource().getLocation();
+			if (location != null) {
+				Path path = Paths.get(location.toURI());
+				String entry = path.toString();
+				if (!result.contains(entry)) {
+					result.add(entry);
+				}
+			}
+		} catch (Exception e) {
+			// ignore classpath discovery failures
+		}
 		if (additionalClasspathList == null) {
 			return;
 		}

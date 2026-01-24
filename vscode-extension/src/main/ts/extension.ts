@@ -25,6 +25,7 @@ import {
   LanguageClientOptions,
   Executable,
 } from "vscode-languageclient/node";
+import { DebugAdapterExecutable } from "vscode";
 
 const MISSING_JAVA_ERROR =
   "Could not locate valid JDK. To configure JDK manually, use the groovy.java.home setting.";
@@ -38,6 +39,8 @@ const LABEL_RELOAD_WINDOW = "Reload Window";
 let extensionContext: vscode.ExtensionContext | null = null;
 let languageClient: LanguageClient | null = null;
 let javaPath: string | null = null;
+let debugAdapterExecutable: DebugAdapterExecutable | null = null;
+let debugAdapterFactory: vscode.Disposable | null = null;
 
 function onDidChangeConfiguration(event: vscode.ConfigurationChangeEvent) {
   if (event.affectsConfiguration("groovy.java.home")) {
@@ -87,6 +90,14 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+  if (debugAdapterExecutable) {
+    debugAdapterExecutable.dispose();
+    debugAdapterExecutable = null;
+  }
+  if (debugAdapterFactory) {
+    debugAdapterFactory.dispose();
+    debugAdapterFactory = null;
+  }
   extensionContext = null;
 }
 
@@ -153,6 +164,29 @@ function startLanguageServer() {
           executable,
           clientOptions
         );
+        if (debugAdapterExecutable) {
+          debugAdapterExecutable.dispose();
+        }
+        debugAdapterExecutable = new vscode.DebugAdapterExecutable(javaPath, [
+          "-cp",
+          path.resolve(
+            extensionContext.extensionPath,
+            "bin",
+            "groovy-language-server-all.jar"
+          ),
+          "net.prominic.groovyls.debug.GroovyDebugAdapterLauncher",
+        ]);
+        if (!debugAdapterFactory) {
+          debugAdapterFactory = vscode.debug.registerDebugAdapterDescriptorFactory(
+            "groovy",
+            {
+              createDebugAdapterDescriptor(): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+                return debugAdapterExecutable;
+              },
+            }
+          );
+          extensionContext.subscriptions.push(debugAdapterFactory);
+        }
         try {
           await languageClient.start();
         } catch (e) {

@@ -40,6 +40,64 @@
     "onLanguage:groovy"
   ],
   "contributes": {
+    "debuggers": [
+      {
+        "type": "groovy",
+        "label": "Groovy Debug",
+        "languages": [
+          "groovy"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Launch configuration name."
+              },
+              "request": {
+                "type": "string",
+                "enum": [
+                  "launch"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "groovy"
+                ]
+              }
+            }
+          },
+          "attach": {
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Attach configuration name."
+              },
+              "request": {
+                "type": "string",
+                "enum": [
+                  "attach"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "groovy"
+                ]
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "groovy",
+            "request": "launch",
+            "name": "Launch Groovy Debug Adapter"
+          }
+        ]
+      }
+    ],
     "languages": [
       {
         "id": "groovy",

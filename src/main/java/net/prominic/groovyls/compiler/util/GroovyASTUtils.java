@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.codehaus.groovy.ast.ASTNode;
@@ -53,6 +55,7 @@ import org.codehaus.groovy.ast.expr.MapExpression;
 import org.codehaus.groovy.ast.expr.MethodCall;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
 import org.codehaus.groovy.ast.expr.PropertyExpression;
+import org.codehaus.groovy.ast.expr.StaticMethodCallExpression;
 import org.codehaus.groovy.ast.expr.VariableExpression;
 import org.codehaus.groovy.ast.stmt.BlockStatement;
 import org.codehaus.groovy.ast.stmt.ExpressionStatement;
@@ -66,6 +69,7 @@ import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 
 public class GroovyASTUtils {
     private static final List<String> DELEGATES_TO_ANNOTATIONS = List.of("DelegatesTo", "groovy.lang.DelegatesTo");
+    private static final List<String> DSL_MARKER_ANNOTATIONS = List.of("DslMarker", "groovy.lang.DslMarker");
 
     public static ASTNode getEnclosingNodeOfType(ASTNode offsetNode, Class<? extends ASTNode> nodeType,
             ASTNodeVisitor astVisitor) {
@@ -200,7 +204,7 @@ public class GroovyASTUtils {
         } else if (definitionNode instanceof Variable) {
             Variable variable = (Variable) definitionNode;
             ClassNode variableType = variable.getOriginType();
-            if (variableType == null || variableType == ClassHelper.DYNAMIC_TYPE) {
+            if (variableType == null || ClassHelper.isDynamicTyped(variableType)) {
                 variableType = getTypeOfNode(definitionNode, astVisitor);
             }
             return tryToResolveOriginalClassNode(variableType, true, astVisitor);
@@ -374,19 +378,19 @@ public class GroovyASTUtils {
             String opText = binaryExpr.getOperation().getText();
             if (opText != null && opText.contains("[")) {
                 ClassNode leftType = leftExpr.getType();
-                boolean needsGenericResolution = leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+                boolean needsGenericResolution = leftType == null || ClassHelper.isDynamicTyped(leftType)
                         || leftType.getGenericsTypes() == null || leftType.getGenericsTypes().length == 0;
                 if (needsGenericResolution) {
                     ASTNode defNode = GroovyASTUtils.getDefinition(leftExpr, false, astVisitor);
                     if (defNode != null) {
                         ClassNode defType = getTypeOfNode(defNode, astVisitor);
-                        if (defType != null && (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+                        if (defType != null && (leftType == null || ClassHelper.isDynamicTyped(leftType)
                                 || defType.getGenericsTypes() != null && defType.getGenericsTypes().length > 0)) {
                             leftType = defType;
                         }
                     }
                 }
-                if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE)
+                if ((leftType == null || ClassHelper.isDynamicTyped(leftType))
                         && leftExpr instanceof VariableExpression) {
                     String varName = ((VariableExpression) leftExpr).getName();
                     for (ASTNode candidate : astVisitor.getNodes()) {
@@ -395,12 +399,12 @@ public class GroovyASTUtils {
                             if (decl.getVariableExpression() != null
                                     && varName.equals(decl.getVariableExpression().getName())) {
                                 ClassNode origin = decl.getVariableExpression().getOriginType();
-                                if (origin != null && origin != ClassHelper.DYNAMIC_TYPE) {
+                                if (origin != null && !ClassHelper.isDynamicTyped(origin)) {
                                     leftType = origin;
                                     break;
                                 }
                                 ClassNode varType = decl.getVariableExpression().getType();
-                                if (varType != null && varType != ClassHelper.DYNAMIC_TYPE) {
+                                if (varType != null && !ClassHelper.isDynamicTyped(varType)) {
                                     leftType = varType;
                                     break;
                                 }
@@ -459,7 +463,26 @@ public class GroovyASTUtils {
         } else if (node instanceof ClassExpression) {
             ClassExpression expression = (ClassExpression) node;
             // This means it's an expression like this: SomeClass.someProp
-            return expression.getType();
+            ClassNode type = expression.getType();
+            if (type != null && type.redirect() == ClassHelper.CLASS_Type && type.getGenericsTypes() != null
+                    && type.getGenericsTypes().length > 0) {
+                ClassNode genericType = type.getGenericsTypes()[0].getType();
+                if (genericType != null) {
+                    return astVisitor != null ? tryToResolveOriginalClassNode(genericType, false, astVisitor)
+                            : genericType;
+                }
+            }
+            if (type != null && astVisitor != null) {
+                ClassNode resolved = tryToResolveOriginalClassNode(type, false, astVisitor);
+                if (resolved != null) {
+                    return resolved;
+                }
+                ClassNode byName = findClassNodeByName(expression.getText(), astVisitor);
+                if (byName != null) {
+                    return byName;
+                }
+            }
+            return type;
         } else if (node instanceof ConstructorCallExpression) {
             ConstructorCallExpression expression = (ConstructorCallExpression) node;
             return expression.getType();
@@ -470,7 +493,7 @@ public class GroovyASTUtils {
                 methodNode = resolveMethodByName(expression, astVisitor);
             }
             if (methodNode != null) {
-                return inferReturnType(methodNode, astVisitor);
+                return inferReturnTypeFromCall(expression, methodNode, astVisitor);
             }
             return expression.getType();
         } else if (node instanceof PropertyExpression) {
@@ -532,7 +555,7 @@ public class GroovyASTUtils {
             if (var.getOriginType() != null) {
                 return var.getOriginType();
             }
-            if (var.getType() != null && var.getType() != ClassHelper.DYNAMIC_TYPE) {
+            if (var.getType() != null && !ClassHelper.isDynamicTyped(var.getType())) {
                 return var.getType();
             }
             if (var.getName() != null) {
@@ -549,6 +572,10 @@ public class GroovyASTUtils {
         return null;
     }
 
+    public static ClassNode getDelegatesToType(ASTNode node, ASTNodeVisitor astVisitor) {
+        return resolveDelegatesToType(node, astVisitor);
+    }
+
     private static ClassNode inferReturnType(MethodNode method, ASTNodeVisitor astVisitor) {
         if (method == null) {
             return null;
@@ -556,7 +583,7 @@ public class GroovyASTUtils {
         ClassNode declaredType = method.getReturnType();
         boolean dynamicReturnType = method.isDynamicReturnType();
         if (!dynamicReturnType && declaredType != null
-                && declaredType != ClassHelper.DYNAMIC_TYPE
+                && !ClassHelper.isDynamicTyped(declaredType)
                 && declaredType != ClassHelper.OBJECT_TYPE) {
             return declaredType;
         }
@@ -571,6 +598,118 @@ public class GroovyASTUtils {
             return commonType;
         }
         return declaredType != null ? declaredType : ClassHelper.OBJECT_TYPE;
+    }
+
+    private static ClassNode inferReturnTypeFromCall(MethodCallExpression call, MethodNode method,
+            ASTNodeVisitor astVisitor) {
+        ClassNode baseReturnType = inferReturnType(method, astVisitor);
+        if (baseReturnType == null) {
+            return null;
+        }
+        if (!baseReturnType.isGenericsPlaceHolder() && !baseReturnType.isUsingGenerics()) {
+            return baseReturnType;
+        }
+        java.util.Map<String, ClassNode> genericsMap = resolveGenericsFromCallArguments(call, method, astVisitor);
+        if (genericsMap.isEmpty()) {
+            return baseReturnType;
+        }
+        return substituteGenerics(baseReturnType, genericsMap);
+    }
+
+    private static java.util.Map<String, ClassNode> resolveGenericsFromCallArguments(MethodCallExpression call,
+            MethodNode method, ASTNodeVisitor astVisitor) {
+        java.util.Map<String, ClassNode> mapping = new java.util.HashMap<>();
+        if (call == null || method == null || !(call.getArguments() instanceof ArgumentListExpression)) {
+            return mapping;
+        }
+        ClassNode ownerType = getTypeOfNode(call.getObjectExpression(), astVisitor);
+        if (ownerType != null && method.getDeclaringClass() != null) {
+            GenericsType[] ownerGenerics = ownerType.getGenericsTypes();
+            GenericsType[] classGenerics = method.getDeclaringClass().getGenericsTypes();
+            if (ownerGenerics != null && classGenerics != null
+                    && ownerGenerics.length == classGenerics.length) {
+                for (int i = 0; i < ownerGenerics.length; i++) {
+                    ClassNode classGenericType = classGenerics[i].getType();
+                    ClassNode ownerGenericType = ownerGenerics[i].getType();
+                    collectGenericsMapping(classGenericType, ownerGenericType, mapping);
+                }
+            }
+        }
+        ArgumentListExpression args = (ArgumentListExpression) call.getArguments();
+        List<Expression> expressions = args.getExpressions();
+        Parameter[] parameters = method.getParameters();
+        int count = Math.min(parameters.length, expressions.size());
+        for (int i = 0; i < count; i++) {
+            Parameter param = parameters[i];
+            Expression argExpr = expressions.get(i);
+            ClassNode argType = getTypeOfNode(argExpr, astVisitor);
+            if (argType == null) {
+                continue;
+            }
+            ClassNode paramType = param != null ? param.getType() : null;
+            if (paramType == null) {
+                continue;
+            }
+            collectGenericsMapping(paramType, argType, mapping);
+        }
+        return mapping;
+    }
+
+    private static void collectGenericsMapping(ClassNode paramType, ClassNode argType,
+            java.util.Map<String, ClassNode> mapping) {
+        if (paramType == null || argType == null) {
+            return;
+        }
+        if (paramType.isGenericsPlaceHolder()) {
+            String name = paramType.getUnresolvedName();
+            if (name == null || name.isBlank()) {
+                name = paramType.getName();
+            }
+            if (name != null && !name.isBlank()) {
+                mapping.putIfAbsent(name, argType);
+            }
+            return;
+        }
+        GenericsType[] paramGenerics = paramType.getGenericsTypes();
+        GenericsType[] argGenerics = argType.getGenericsTypes();
+        if (paramGenerics != null && argGenerics != null
+                && paramGenerics.length == argGenerics.length) {
+            for (int i = 0; i < paramGenerics.length; i++) {
+                ClassNode paramGenericType = paramGenerics[i].getType();
+                ClassNode argGenericType = argGenerics[i].getType();
+                collectGenericsMapping(paramGenericType, argGenericType, mapping);
+            }
+        }
+    }
+
+    private static ClassNode substituteGenerics(ClassNode type, java.util.Map<String, ClassNode> mapping) {
+        if (type == null || mapping == null || mapping.isEmpty()) {
+            return type;
+        }
+        if (type.isGenericsPlaceHolder()) {
+            String name = type.getUnresolvedName();
+            if (name == null || name.isBlank()) {
+                name = type.getName();
+            }
+            ClassNode mapped = name != null ? mapping.get(name) : null;
+            return mapped != null ? mapped : type;
+        }
+        if (!type.isUsingGenerics()) {
+            return type;
+        }
+        ClassNode resolved = type.getPlainNodeReference();
+        GenericsType[] generics = type.getGenericsTypes();
+        if (generics == null || generics.length == 0) {
+            return resolved;
+        }
+        GenericsType[] resolvedGenerics = new GenericsType[generics.length];
+        for (int i = 0; i < generics.length; i++) {
+            ClassNode genericType = generics[i].getType();
+            ClassNode substituted = substituteGenerics(genericType, mapping);
+            resolvedGenerics[i] = new GenericsType(substituted);
+        }
+        resolved.setGenericsTypes(resolvedGenerics);
+        return resolved;
     }
 
     private static boolean collectReturnTypes(Statement statement, List<ClassNode> returnTypes,
@@ -741,38 +880,250 @@ public class GroovyASTUtils {
         }
         ClosureExpression closure = (ClosureExpression) closureNode;
         ASTNode enclosingCall = getEnclosingNodeOfType(closure, MethodCallExpression.class, astVisitor);
-        if (!(enclosingCall instanceof MethodCallExpression)) {
-            return null;
+        MethodNode method = null;
+        ClassNode dslFallback = null;
+        int index = -1;
+        if (enclosingCall instanceof MethodCallExpression) {
+            MethodCallExpression call = (MethodCallExpression) enclosingCall;
+            method = getMethodFromCallExpression(call, astVisitor);
+            if (method == null) {
+                method = resolveMethodByName(call, astVisitor);
+            }
+            dslFallback = resolveDslMarkerType(call, astVisitor);
+            index = findClosureArgumentIndex(call, closure);
+        } else {
+            ASTNode enclosingStaticCall = getEnclosingNodeOfType(closure, StaticMethodCallExpression.class,
+                    astVisitor);
+            if (!(enclosingStaticCall instanceof StaticMethodCallExpression)) {
+                return null;
+            }
+            StaticMethodCallExpression call = (StaticMethodCallExpression) enclosingStaticCall;
+            method = resolveStaticMethodByName(call);
+            dslFallback = resolveDslMarkerType(call, astVisitor);
+            index = findClosureArgumentIndex(call, closure);
         }
-        MethodCallExpression call = (MethodCallExpression) enclosingCall;
-        MethodNode method = getMethodFromCallExpression(call, astVisitor);
         if (method == null) {
-            method = resolveMethodByName(call, astVisitor);
+            return dslFallback;
         }
-        if (method == null) {
-            return null;
-        }
-        int index = findClosureArgumentIndex(call, closure);
         if (index < 0) {
             index = findClosureParameterIndex(method);
         }
         if (index < 0 || index >= method.getParameters().length) {
-            return null;
+            return dslFallback;
         }
         Parameter parameter = method.getParameters()[index];
         AnnotationNode delegatesTo = findAnnotation(parameter, DELEGATES_TO_ANNOTATIONS);
         if (delegatesTo == null) {
-            return null;
+            return dslFallback;
         }
         Expression value = delegatesTo.getMember("value");
         ClassNode resolved = resolveClassNodeFromExpression(value);
         if (resolved != null) {
             return resolved;
         }
-        return parameter.getType();
+        return parameter.getType() != null ? parameter.getType() : dslFallback;
+    }
+
+    private static ClassNode resolveDslMarkerType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
+        if (call == null || astVisitor == null) {
+            return null;
+        }
+        String methodName = call.getMethodAsString();
+        if (methodName == null) {
+            return null;
+        }
+        ClassNode resolved = findDslMarkerOwnerType(call, astVisitor, methodName);
+        if (resolved != null) {
+            return resolved;
+        }
+        return findDslMarkerClassType(call, astVisitor);
+    }
+
+    private static ClassNode resolveDslMarkerType(StaticMethodCallExpression call, ASTNodeVisitor astVisitor) {
+        if (call == null || astVisitor == null) {
+            return null;
+        }
+        String methodName = call.getMethod();
+        if (methodName == null) {
+            return null;
+        }
+        ClassNode owner = call.getOwnerType();
+        if (owner == null) {
+            return null;
+        }
+        for (MethodNode candidate : owner.getMethods(methodName)) {
+            if (!candidate.isStatic()) {
+                continue;
+            }
+            ClassNode resolved = resolveDslMarkerTypeFromMethod(candidate);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+        if (hasAnnotation(owner, DSL_MARKER_ANNOTATIONS)) {
+            return owner;
+        }
+        return null;
+    }
+
+    private static ClassNode findDslMarkerOwnerType(MethodCallExpression call, ASTNodeVisitor astVisitor,
+            String methodName) {
+        ClassNode owner = resolveCallOwnerType(call, astVisitor);
+        if (owner == null) {
+            return null;
+        }
+        for (MethodNode candidate : owner.getMethods(methodName)) {
+            ClassNode resolved = resolveDslMarkerTypeFromMethod(candidate);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+        return null;
+    }
+
+    private static ClassNode resolveDslMarkerTypeFromMethod(MethodNode method) {
+        if (method == null) {
+            return null;
+        }
+        boolean methodMarked = hasAnnotation(method, DSL_MARKER_ANNOTATIONS);
+        Parameter[] params = method.getParameters();
+        ClassNode fallback = null;
+        for (Parameter param : params) {
+            ClassNode type = param.getType();
+            boolean isClosure = type != null && "groovy.lang.Closure".equals(type.getName());
+            ClassNode resolved = resolveDslMarkerOwner(param);
+            if (resolved != null) {
+                return resolved;
+            }
+            if (methodMarked && !isClosure && fallback == null && type != null) {
+                fallback = type;
+            }
+        }
+        return fallback;
+    }
+
+    private static ClassNode findDslMarkerClassType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
+        if (call == null || astVisitor == null) {
+            return null;
+        }
+        ClassNode owner = resolveCallOwnerType(call, astVisitor);
+        if (owner == null) {
+            return null;
+        }
+        if (hasAnnotation(owner, DSL_MARKER_ANNOTATIONS)) {
+            return owner;
+        }
+        return null;
+    }
+
+    private static ClassNode resolveCallOwnerType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
+        ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
+        if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
+            ClassExpression classExpr = (ClassExpression) call.getObjectExpression();
+            ClassNode exprType = classExpr.getType();
+            ClassNode resolved = null;
+            if (exprType != null && exprType.redirect() == ClassHelper.CLASS_Type) {
+                resolved = resolveClassNodeFromExpression(classExpr);
+            } else {
+                resolved = exprType;
+            }
+            if (resolved != null) {
+                ClassNode found = findClassNodeByName(resolved.getName(), astVisitor);
+                owner = found != null ? found : resolved;
+            }
+        }
+        if (owner == null && call.getObjectExpression() instanceof VariableExpression) {
+            String name = ((VariableExpression) call.getObjectExpression()).getName();
+            owner = findClassNodeByName(name, astVisitor);
+        }
+        if (owner == null && call.isImplicitThis()) {
+            ASTNode enclosingClass = getEnclosingNodeOfType(call, ClassNode.class, astVisitor);
+            if (enclosingClass instanceof ClassNode) {
+                owner = (ClassNode) enclosingClass;
+            }
+        }
+        return owner;
+    }
+
+    private static boolean hasAnnotation(AnnotatedNode node, List<String> names) {
+        if (node == null) {
+            return false;
+        }
+        return findAnnotation(node, names) != null;
+    }
+
+    private static ClassNode resolveDslMarkerOwner(AnnotatedNode node) {
+        return resolveDslMarkerOwner(node, new HashSet<>());
+    }
+
+    private static ClassNode resolveDslMarkerOwner(AnnotatedNode node, Set<ClassNode> visited) {
+        if (node == null) {
+            return null;
+        }
+        if (node instanceof ClassNode) {
+            ClassNode classNode = (ClassNode) node;
+            if (!visited.add(classNode)) {
+                return null;
+            }
+        }
+        AnnotationNode marker = findAnnotation(node, DSL_MARKER_ANNOTATIONS);
+        if (marker != null) {
+            ClassNode resolved = resolveClassNodeFromExpression(marker.getMember("value"));
+            if (resolved != null) {
+                return resolved;
+            }
+            if (node instanceof Parameter) {
+                ClassNode type = ((Parameter) node).getType();
+                return type;
+            }
+            if (node instanceof ClassNode) {
+                return (ClassNode) node;
+            }
+            return ClassHelper.OBJECT_TYPE;
+        }
+        if (node instanceof Parameter) {
+            ClassNode type = ((Parameter) node).getType();
+            if (type != null) {
+                return resolveDslMarkerOwner(type, visited);
+            }
+        } else if (node instanceof ClassNode) {
+            ClassNode classNode = (ClassNode) node;
+            ClassNode superClass = null;
+            try {
+                superClass = classNode.getSuperClass();
+            } catch (NoClassDefFoundError e) {
+                superClass = null;
+            }
+            if (superClass != null) {
+                ClassNode resolved = resolveDslMarkerOwner(superClass, visited);
+                if (resolved != null) {
+                    return resolved;
+                }
+            }
+            for (ClassNode iface : classNode.getInterfaces()) {
+                ClassNode resolved = resolveDslMarkerOwner(iface, visited);
+                if (resolved != null) {
+                    return resolved;
+                }
+            }
+        }
+        return null;
     }
 
     private static int findClosureArgumentIndex(MethodCallExpression call, ClosureExpression closure) {
+        if (call.getArguments() instanceof ArgumentListExpression) {
+            ArgumentListExpression args = (ArgumentListExpression) call.getArguments();
+            List<Expression> expressions = args.getExpressions();
+            for (int i = 0; i < expressions.size(); i++) {
+                if (expressions.get(i) == closure) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static int findClosureArgumentIndex(StaticMethodCallExpression call, ClosureExpression closure) {
         if (call.getArguments() instanceof ArgumentListExpression) {
             ArgumentListExpression args = (ArgumentListExpression) call.getArguments();
             List<Expression> expressions = args.getExpressions();
@@ -804,26 +1155,33 @@ public class GroovyASTUtils {
         if (methodName == null) {
             return null;
         }
-        ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
-        if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
-            owner = ((ClassExpression) call.getObjectExpression()).getType();
-        }
-        if (owner == null && call.getObjectExpression() instanceof VariableExpression) {
-            String name = ((VariableExpression) call.getObjectExpression()).getName();
-            owner = findClassNodeByName(name, astVisitor);
-        }
-        if (owner == null && call.isImplicitThis()) {
-            ASTNode enclosingClass = getEnclosingNodeOfType(call, ClassNode.class, astVisitor);
-            if (enclosingClass instanceof ClassNode) {
-                owner = (ClassNode) enclosingClass;
-            }
-        }
+        ClassNode owner = resolveCallOwnerType(call, astVisitor);
         if (owner == null) {
             return null;
         }
         boolean statics = call.getObjectExpression() instanceof ClassExpression;
         for (MethodNode method : owner.getMethods(methodName)) {
             if (statics == method.isStatic()) {
+                return method;
+            }
+        }
+        return owner.getMethods(methodName).stream().findFirst().orElse(null);
+    }
+
+    private static MethodNode resolveStaticMethodByName(StaticMethodCallExpression call) {
+        if (call == null) {
+            return null;
+        }
+        String methodName = call.getMethod();
+        if (methodName == null) {
+            return null;
+        }
+        ClassNode owner = call.getOwnerType();
+        if (owner == null) {
+            return null;
+        }
+        for (MethodNode method : owner.getMethods(methodName)) {
+            if (method.isStatic()) {
                 return method;
             }
         }

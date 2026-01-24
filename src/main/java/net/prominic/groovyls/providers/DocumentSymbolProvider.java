@@ -61,25 +61,25 @@ public class DocumentSymbolProvider {
 		}).map(node -> {
 			if (node instanceof ClassNode) {
 				ClassNode classNode = (ClassNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(classNode, uri, null);
+				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(classNode);
 			}
 			ClassNode classNode = (ClassNode) GroovyASTUtils.getEnclosingNodeOfType(node, ClassNode.class, ast);
 			if (node instanceof MethodNode) {
 				MethodNode methodNode = (MethodNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(methodNode, uri, classNode.getName());
+				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(methodNode);
 			}
 			if (node instanceof PropertyNode) {
 				PropertyNode propNode = (PropertyNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(propNode, uri, classNode.getName());
+				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(propNode);
 			}
 			if (node instanceof FieldNode) {
 				FieldNode fieldNode = (FieldNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(fieldNode, uri, classNode.getName());
+				return GroovyLanguageServerUtils.astNodeToDocumentSymbol(fieldNode);
 			}
 			// this should never happen
 			return null;
 		}).filter(symbolInformation -> symbolInformation != null).map(node -> {
-			return Either.<SymbolInformation, DocumentSymbol>forLeft(node);
+			return Either.<SymbolInformation, DocumentSymbol>forRight(node);
 		}).collect(Collectors.toList());
 		return CompletableFuture.completedFuture(symbols);
 	}

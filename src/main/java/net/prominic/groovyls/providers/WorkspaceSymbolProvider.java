@@ -30,7 +30,7 @@ import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.FieldNode;
 import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.PropertyNode;
-import org.eclipse.lsp4j.SymbolInformation;
+import org.eclipse.lsp4j.WorkspaceSymbol;
 
 import net.prominic.groovyls.compiler.ast.ASTNodeVisitor;
 import net.prominic.groovyls.compiler.util.GroovyASTUtils;
@@ -43,7 +43,7 @@ public class WorkspaceSymbolProvider {
 		this.ast = ast;
 	}
 
-	public CompletableFuture<List<? extends SymbolInformation>> provideWorkspaceSymbols(String query) {
+	public CompletableFuture<List<? extends WorkspaceSymbol>> provideWorkspaceSymbols(String query) {
 		if (ast == null) {
 			// this shouldn't happen, but let's avoid an exception if something
 			// goes terribly wrong.
@@ -51,7 +51,7 @@ public class WorkspaceSymbolProvider {
 		}
 		String lowerCaseQuery = query.toLowerCase();
 		List<ASTNode> nodes = ast.getNodes();
-		List<SymbolInformation> symbols = nodes.stream().filter(node -> {
+		List<WorkspaceSymbol> symbols = nodes.stream().filter(node -> {
 			String name = null;
 			if (node instanceof ClassNode) {
 				ClassNode classNode = (ClassNode) node;
@@ -74,20 +74,20 @@ public class WorkspaceSymbolProvider {
 			URI uri = ast.getURI(node);
 			if (node instanceof ClassNode) {
 				ClassNode classNode = (ClassNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(classNode, uri, null);
+				return GroovyLanguageServerUtils.astNodeToWorkspaceSymbol(classNode, uri, null);
 			}
 			ClassNode classNode = (ClassNode) GroovyASTUtils.getEnclosingNodeOfType(node, ClassNode.class, ast);
 			if (node instanceof MethodNode) {
 				MethodNode methodNode = (MethodNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(methodNode, uri, classNode.getName());
+				return GroovyLanguageServerUtils.astNodeToWorkspaceSymbol(methodNode, uri, classNode.getName());
 			}
 			if (node instanceof PropertyNode) {
 				PropertyNode propNode = (PropertyNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(propNode, uri, classNode.getName());
+				return GroovyLanguageServerUtils.astNodeToWorkspaceSymbol(propNode, uri, classNode.getName());
 			}
 			if (node instanceof FieldNode) {
 				FieldNode fieldNode = (FieldNode) node;
-				return GroovyLanguageServerUtils.astNodeToSymbolInformation(fieldNode, uri, classNode.getName());
+				return GroovyLanguageServerUtils.astNodeToWorkspaceSymbol(fieldNode, uri, classNode.getName());
 			}
 			// this should never happen
 			return null;
