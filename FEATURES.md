@@ -196,16 +196,16 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 - [ ] **Debug Adapter Protocol (DAP) implementation**
 
 ### 14. **Project Configuration**
-- [ ] **Recursive classpath search** (#100, has PR #99)
-- [ ] **Better classpath management**
+- [x] **Recursive classpath search** (#100, has PR #99)
+- [x] **Better classpath management**
   - GUI for adding JARs
   - Maven repository support
   
-- [ ] **Source roots detection**
+- [x] **Source roots detection**
   - `src/main/groovy`
   - `src/test/groovy`
   
-- [ ] **Exclude patterns** (#79)
+- [x] **Exclude patterns** (#79)
   - Ignore `build/`, `target/`, etc.
   - Custom exclude patterns
 

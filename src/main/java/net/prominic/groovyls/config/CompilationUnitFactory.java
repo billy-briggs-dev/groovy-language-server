@@ -22,13 +22,21 @@ package net.prominic.groovyls.config;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.PathMatcher;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.codehaus.groovy.control.CompilerConfiguration;
@@ -41,13 +49,31 @@ import net.prominic.groovyls.util.FileContentsTracker;
 
 public class CompilationUnitFactory implements ICompilationUnitFactory {
 	private static final String FILE_EXTENSION_GROOVY = ".groovy";
+	private static final List<String> DEFAULT_EXCLUDE_PATTERNS = Arrays.asList(
+			"**/build/**",
+			"**/target/**",
+			"**/.gradle/**",
+			"**/.git/**",
+			"**/.idea/**",
+			"**/out/**",
+			"**/bin/**"
+	);
+	private static final List<Path> DEFAULT_SOURCE_ROOT_SUFFIXES = Arrays.asList(
+			Paths.get("src", "main", "groovy"),
+			Paths.get("src", "test", "groovy")
+	);
 
 	private GroovyLSCompilationUnit compilationUnit;
 	private CompilerConfiguration config;
 	private GroovyClassLoader classLoader;
 	private List<String> additionalClasspathList;
+	private boolean classpathRecursive;
+	private List<String> excludePatterns = new ArrayList<>();
+	private List<String> sourceRoots = new ArrayList<>();
+	private List<PathMatcher> excludeMatchers = new ArrayList<>();
 
 	public CompilationUnitFactory() {
+		buildExcludeMatchers();
 	}
 
 	public List<String> getAdditionalClasspathList() {
@@ -56,6 +82,33 @@ public class CompilationUnitFactory implements ICompilationUnitFactory {
 
 	public void setAdditionalClasspathList(List<String> additionalClasspathList) {
 		this.additionalClasspathList = additionalClasspathList;
+		invalidateCompilationUnit();
+	}
+
+	public void setClasspathRecursive(boolean classpathRecursive) {
+		if (this.classpathRecursive == classpathRecursive) {
+			return;
+		}
+		this.classpathRecursive = classpathRecursive;
+		invalidateCompilationUnit();
+	}
+
+	public void setExcludePatterns(List<String> excludePatterns) {
+		List<String> next = excludePatterns == null ? new ArrayList<>() : new ArrayList<>(excludePatterns);
+		if (Objects.equals(this.excludePatterns, next)) {
+			return;
+		}
+		this.excludePatterns = next;
+		buildExcludeMatchers();
+		invalidateCompilationUnit();
+	}
+
+	public void setSourceRoots(List<String> sourceRoots) {
+		List<String> next = sourceRoots == null ? new ArrayList<>() : new ArrayList<>(sourceRoots);
+		if (Objects.equals(this.sourceRoots, next)) {
+			return;
+		}
+		this.sourceRoots = next;
 		invalidateCompilationUnit();
 	}
 
@@ -95,7 +148,15 @@ public class CompilationUnitFactory implements ICompilationUnitFactory {
 		}
 
 		if (workspaceRoot != null) {
-			addDirectoryToCompilationUnit(workspaceRoot, compilationUnit, fileContentsTracker, changedUris);
+			List<Path> roots = resolveSourceRoots(workspaceRoot);
+			if (roots.isEmpty()) {
+				addDirectoryToCompilationUnit(workspaceRoot, workspaceRoot, compilationUnit, fileContentsTracker,
+						changedUris);
+			} else {
+				for (Path root : roots) {
+					addDirectoryToCompilationUnit(workspaceRoot, root, compilationUnit, fileContentsTracker, changedUris);
+				}
+			}
 		} else {
 			final Set<URI> urisToAdd = changedUris;
 			fileContentsTracker.getOpenURIs().forEach(uri -> {
@@ -155,12 +216,7 @@ public class CompilationUnitFactory implements ICompilationUnitFactory {
 				continue;
 			}
 			if (file.isDirectory()) {
-				for (File child : file.listFiles()) {
-					if (!child.getName().endsWith(".jar") || !child.isFile()) {
-						continue;
-					}
-					result.add(child.getPath());
-				}
+				collectClasspathJars(file.toPath(), result);
 			} else if (!mustBeDirectory && file.isFile()) {
 				if (file.getName().endsWith(".jar")) {
 					result.add(entry);
@@ -169,22 +225,151 @@ public class CompilationUnitFactory implements ICompilationUnitFactory {
 		}
 	}
 
-	protected void addDirectoryToCompilationUnit(Path dirPath, GroovyLSCompilationUnit compilationUnit,
+	private void collectClasspathJars(Path directory, List<String> result) {
+		if (directory == null || !Files.isDirectory(directory)) {
+			return;
+		}
+		if (!classpathRecursive) {
+			File[] children = directory.toFile().listFiles();
+			if (children == null) {
+				return;
+			}
+			for (File child : children) {
+				if (child.isFile() && child.getName().endsWith(".jar")) {
+					result.add(child.getPath());
+				}
+			}
+			return;
+		}
+		try {
+			Files.walkFileTree(directory, new SimpleFileVisitor<Path>() {
+				@Override
+				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+					if (file.getFileName() != null && file.getFileName().toString().endsWith(".jar")) {
+						result.add(file.toString());
+					}
+					return FileVisitResult.CONTINUE;
+				}
+			});
+		} catch (IOException e) {
+			System.err.println("Failed to scan classpath directory: " + directory);
+		}
+	}
+
+	private void buildExcludeMatchers() {
+		List<String> patterns = new ArrayList<>(DEFAULT_EXCLUDE_PATTERNS);
+		patterns.addAll(excludePatterns);
+		List<PathMatcher> matchers = new ArrayList<>();
+		for (String pattern : patterns) {
+			if (pattern == null || pattern.isBlank()) {
+				continue;
+			}
+			String normalized = pattern.replace("/", File.separator);
+			matchers.add(FileSystems.getDefault().getPathMatcher("glob:" + normalized));
+		}
+		this.excludeMatchers = matchers;
+	}
+
+	private boolean shouldExclude(Path path, Path workspaceRoot) {
+		if (path == null || excludeMatchers == null || excludeMatchers.isEmpty() || workspaceRoot == null) {
+			return false;
+		}
+		Path relative;
+		try {
+			relative = workspaceRoot.normalize().relativize(path.normalize());
+		} catch (IllegalArgumentException e) {
+			return false;
+		}
+		for (PathMatcher matcher : excludeMatchers) {
+			if (matcher.matches(relative)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean isDefaultSourceRoot(Path dir) {
+		for (Path suffix : DEFAULT_SOURCE_ROOT_SUFFIXES) {
+			if (dir.endsWith(suffix)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private List<Path> resolveSourceRoots(Path workspaceRoot) {
+		if (workspaceRoot == null) {
+			return new ArrayList<>();
+		}
+		List<Path> roots = new ArrayList<>();
+		if (sourceRoots != null && !sourceRoots.isEmpty()) {
+			for (String rawRoot : sourceRoots) {
+				if (rawRoot == null || rawRoot.isBlank()) {
+					continue;
+				}
+				Path rootPath = Paths.get(rawRoot);
+				if (!rootPath.isAbsolute()) {
+					rootPath = workspaceRoot.resolve(rootPath);
+				}
+				if (Files.isDirectory(rootPath)) {
+					roots.add(rootPath.normalize());
+				}
+			}
+			return roots;
+		}
+		if (excludeMatchers.isEmpty()) {
+			buildExcludeMatchers();
+		}
+		Set<Path> detected = new LinkedHashSet<>();
+		try {
+			Files.walkFileTree(workspaceRoot, new SimpleFileVisitor<Path>() {
+				@Override
+				public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+					if (shouldExclude(dir, workspaceRoot)) {
+						return FileVisitResult.SKIP_SUBTREE;
+					}
+					if (isDefaultSourceRoot(dir)) {
+						detected.add(dir.normalize());
+						return FileVisitResult.SKIP_SUBTREE;
+					}
+					return FileVisitResult.CONTINUE;
+				}
+			});
+		} catch (IOException e) {
+			System.err.println("Failed to detect source roots: " + workspaceRoot);
+		}
+		roots.addAll(detected);
+		return roots;
+	}
+
+	protected void addDirectoryToCompilationUnit(Path workspaceRoot, Path dirPath, GroovyLSCompilationUnit compilationUnit,
 			FileContentsTracker fileContentsTracker, Set<URI> changedUris) {
 		try {
 			if (Files.exists(dirPath)) {
-				Files.walk(dirPath).forEach((filePath) -> {
-					if (!filePath.toString().endsWith(FILE_EXTENSION_GROOVY)) {
-						return;
+				Files.walkFileTree(dirPath, new SimpleFileVisitor<Path>() {
+					@Override
+					public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+						if (workspaceRoot != null && shouldExclude(dir, workspaceRoot)) {
+							return FileVisitResult.SKIP_SUBTREE;
+						}
+						return FileVisitResult.CONTINUE;
 					}
-					URI fileURI = filePath.toUri();
-					if (!fileContentsTracker.isOpen(fileURI)) {
-						File file = filePath.toFile();
-						if (file.isFile()) {
-							if (changedUris == null || changedUris.contains(fileURI)) {
-								compilationUnit.addSource(file);
+
+					@Override
+					public FileVisitResult visitFile(Path filePath, BasicFileAttributes attrs) {
+						if (!filePath.toString().endsWith(FILE_EXTENSION_GROOVY)) {
+							return FileVisitResult.CONTINUE;
+						}
+						URI fileURI = filePath.toUri();
+						if (!fileContentsTracker.isOpen(fileURI)) {
+							File file = filePath.toFile();
+							if (file.isFile()) {
+								if (changedUris == null || changedUris.contains(fileURI)) {
+									compilationUnit.addSource(file);
+								}
 							}
 						}
+						return FileVisitResult.CONTINUE;
 					}
 				});
 			}

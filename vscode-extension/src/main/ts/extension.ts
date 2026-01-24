@@ -42,6 +42,68 @@ let javaPath: string | null = null;
 let debugAdapterExecutable: DebugAdapterExecutable | null = null;
 let debugAdapterFactory: vscode.Disposable | null = null;
 
+async function addClasspathJars() {
+  const uris = await vscode.window.showOpenDialog({
+    canSelectMany: true,
+    openLabel: "Add JARs",
+    filters: {
+      "JAR Files": ["jar"],
+    },
+  });
+  if (!uris || uris.length === 0) {
+    return;
+  }
+  const config = vscode.workspace.getConfiguration("groovy");
+  const existing = (config.get("classpath") as string[]) || [];
+  const next = new Set(existing);
+  uris.forEach((uri) => next.add(uri.fsPath));
+  await config.update("classpath", Array.from(next), vscode.ConfigurationTarget.Workspace);
+}
+
+async function addMavenDependency() {
+  const input = await vscode.window.showInputBox({
+    title: "Add Maven Dependency",
+    prompt: "Enter Maven coordinate (group:artifact:version[:classifier][@ext])",
+    placeHolder: "org.codehaus.groovy:groovy:4.0.26",
+    validateInput: (value) => {
+      if (!value || !/^[^\s:]+:[^\s:]+:[^\s:]+/.test(value.trim())) {
+        return "Expected at least group:artifact:version";
+      }
+      return null;
+    },
+  });
+  if (!input) {
+    return;
+  }
+  const config = vscode.workspace.getConfiguration("groovy");
+  const existing = (config.get("maven.dependencies") as string[]) || [];
+  const next = new Set(existing);
+  next.add(input.trim());
+  await config.update("maven.dependencies", Array.from(next), vscode.ConfigurationTarget.Workspace);
+}
+
+async function addMavenRepository() {
+  const input = await vscode.window.showInputBox({
+    title: "Add Maven Repository",
+    prompt: "Enter Maven repository URL",
+    placeHolder: "https://repo1.maven.org/maven2",
+    validateInput: (value) => {
+      if (!value || !/^https?:\/\//.test(value.trim())) {
+        return "Expected a valid http(s) URL";
+      }
+      return null;
+    },
+  });
+  if (!input) {
+    return;
+  }
+  const config = vscode.workspace.getConfiguration("groovy");
+  const existing = (config.get("maven.repositories") as string[]) || [];
+  const next = new Set(existing);
+  next.add(input.trim());
+  await config.update("maven.repositories", Array.from(next), vscode.ConfigurationTarget.Workspace);
+}
+
 function onDidChangeConfiguration(event: vscode.ConfigurationChangeEvent) {
   if (event.affectsConfiguration("groovy.java.home")) {
     javaPath = findJava();
@@ -84,6 +146,18 @@ export function activate(context: vscode.ExtensionContext) {
   vscode.commands.registerCommand(
     "groovy.restartServer",
     restartLanguageServer
+  );
+  vscode.commands.registerCommand(
+    "groovy.addClasspathJars",
+    addClasspathJars
+  );
+  vscode.commands.registerCommand(
+    "groovy.addMavenDependency",
+    addMavenDependency
+  );
+  vscode.commands.registerCommand(
+    "groovy.addMavenRepository",
+    addMavenRepository
   );
 
   startLanguageServer();
