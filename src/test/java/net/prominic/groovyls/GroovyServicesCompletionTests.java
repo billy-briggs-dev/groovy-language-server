@@ -566,7 +566,7 @@ class GroovyServicesCompletionTests {
 		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
 		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
 		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
-		Position position = new Position(4, 9);
+		Position position = new Position(5, 9);
 		Either<List<CompletionItem>, CompletionList> result = services
 				.completion(new CompletionParams(textDocument, position)).get();
 		Assertions.assertTrue(result.isLeft());
@@ -650,6 +650,33 @@ class GroovyServicesCompletionTests {
 		List<CompletionItem> items = result.getLeft();
 		List<CompletionItem> filteredItems = items.stream().filter(item -> {
 			return item.getLabel().equals("public") && item.getKind().equals(CompletionItemKind.Keyword);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+	}
+
+	@Test
+	void testMetaClassMethodCompletion() throws Exception {
+		Path filePath = srcRoot.resolve("Completion.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class Foo { }\n");
+		contents.append("Foo.metaClass.dynamicMethod = { }\n");
+		contents.append("class Completion {\n");
+		contents.append("  public void testMethod() {\n");
+		contents.append("    Foo foo = new Foo()\n");
+		contents.append("    foo.dyn\n");
+		contents.append("  }\n");
+		contents.append("}\n");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(5, 9);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("dynamicMethod") && item.getKind().equals(CompletionItemKind.Method);
 		}).collect(Collectors.toList());
 		Assertions.assertEquals(1, filteredItems.size());
 	}

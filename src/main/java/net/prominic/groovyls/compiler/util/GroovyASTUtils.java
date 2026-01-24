@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import org.codehaus.groovy.ast.ASTNode;
+import org.codehaus.groovy.ast.ClassHelper;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.FieldNode;
 import org.codehaus.groovy.ast.ImportNode;
@@ -269,6 +270,8 @@ public class GroovyASTUtils {
                     return statics ? methodNode.isStatic() : !methodNode.isStatic();
                 }).collect(Collectors.toList()));
 
+                result.addAll(astVisitor.getMetaClassMethods(current));
+
                 if (current.isInterface()) {
                     for (ClassNode interfaceNode : current.getInterfaces()) {
                         classNodes.add(interfaceNode);
@@ -348,6 +351,9 @@ public class GroovyASTUtils {
             if (var.getOriginType() != null) {
                 return var.getOriginType();
             }
+            if (var.getType() != null && var.getType() != ClassHelper.DYNAMIC_TYPE) {
+                return var.getType();
+            }
         }
         if (node instanceof Expression) {
             Expression expression = (Expression) node;
@@ -361,7 +367,11 @@ public class GroovyASTUtils {
             MethodCallExpression methodCallExpr = (MethodCallExpression) node;
             ClassNode leftType = getTypeOfNode(methodCallExpr.getObjectExpression(), astVisitor);
             if (leftType != null) {
-                return leftType.getMethods(methodCallExpr.getMethod().getText());
+                List<MethodNode> methods = new ArrayList<>(leftType.getMethods(methodCallExpr.getMethod().getText()));
+                methods.addAll(astVisitor.getMetaClassMethods(leftType).stream()
+                        .filter(method -> method.getName().equals(methodCallExpr.getMethod().getText()))
+                        .collect(Collectors.toList()));
+                return methods;
             }
         } else if (node instanceof ConstructorCallExpression) {
             ConstructorCallExpression constructorCallExpr = (ConstructorCallExpression) node;

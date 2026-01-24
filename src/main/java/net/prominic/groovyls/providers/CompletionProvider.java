@@ -26,11 +26,14 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.AnnotatedNode;
+import org.codehaus.groovy.ast.ClassHelper;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.FieldNode;
 import org.codehaus.groovy.ast.ImportNode;
@@ -38,6 +41,9 @@ import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.ModuleNode;
 import org.codehaus.groovy.ast.PropertyNode;
 import org.codehaus.groovy.ast.VariableScope;
+import org.codehaus.groovy.ast.expr.BinaryExpression;
+import org.codehaus.groovy.ast.expr.ClassExpression;
+import org.codehaus.groovy.ast.expr.ClosureExpression;
 import org.codehaus.groovy.ast.expr.ConstructorCallExpression;
 import org.codehaus.groovy.ast.expr.Expression;
 import org.codehaus.groovy.ast.expr.MethodCallExpression;
@@ -64,8 +70,12 @@ import net.prominic.groovyls.compiler.ast.ASTNodeVisitor;
 import net.prominic.groovyls.compiler.util.GroovyASTUtils;
 import net.prominic.groovyls.compiler.util.GroovydocUtils;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
+import net.prominic.groovyls.util.FileContentsTracker;
+import net.prominic.lsp.utils.Positions;
 
 public class CompletionProvider {
+	private static final Pattern METACLASS_METHOD_PATTERN = Pattern
+			.compile("([A-Za-z_][\\w\\.]*)\\.metaClass\\.([A-Za-z_][\\w]*)\\s*=\\s*\\{");
 	private static final List<String> KEYWORDS = Arrays.asList(
 			"abstract", "as", "assert", "break", "case", "catch", "class", "continue", "def", "default",
 			"do", "else", "enum", "extends", "false", "final", "for", "if", "implements", "import",
@@ -75,12 +85,15 @@ public class CompletionProvider {
 
 	private ASTNodeVisitor ast;
 	private ScanResult classGraphScanResult;
-	private int maxItemCount = 1000;
+	private FileContentsTracker files;
+	private URI completionUri;
+	private int maxItemCount = 5000;
 	private boolean isIncomplete = false;
 
-	public CompletionProvider(ASTNodeVisitor ast, ScanResult classGraphScanResult) {
+	public CompletionProvider(ASTNodeVisitor ast, ScanResult classGraphScanResult, FileContentsTracker files) {
 		this.ast = ast;
 		this.classGraphScanResult = classGraphScanResult;
+		this.files = files;
 	}
 
 	public CompletableFuture<Either<List<CompletionItem>, CompletionList>> provideCompletion(
@@ -91,9 +104,18 @@ public class CompletionProvider {
 			return CompletableFuture.completedFuture(Either.forLeft(Collections.emptyList()));
 		}
 		URI uri = URI.create(textDocument.getUri());
+		completionUri = uri;
 		ASTNode offsetNode = ast.getNodeAtLineAndColumn(uri, position.getLine(), position.getCharacter());
 		if (offsetNode == null) {
-			return CompletableFuture.completedFuture(Either.forLeft(Collections.emptyList()));
+			List<CompletionItem> fallbackItems = new ArrayList<>();
+			if (hasMemberAccessInSource(position)) {
+				String prefix = getMemberNameFromSource(position);
+				if (prefix == null) {
+					prefix = "";
+				}
+				populateItemsFromSourceMetaClassAssignments(prefix, fallbackItems);
+			}
+			return CompletableFuture.completedFuture(Either.forLeft(fallbackItems));
 		}
 		ASTNode parentNode = ast.getParent(offsetNode);
 
@@ -122,19 +144,73 @@ public class CompletionProvider {
 			populateItemsFromScope(offsetNode, "", items);
 		}
 
+		if (items.isEmpty()) {
+			PropertyExpression fallback = findPropertyExpressionAtPosition(uri, position);
+			if (fallback != null) {
+				populateItemsFromPropertyExpression(fallback, position, items);
+			}
+		}
+
+		if (hasMemberAccessInSource(position)) {
+			String prefix = getMemberNameFromSource(position);
+			if (prefix == null) {
+				prefix = "";
+			}
+			populateItemsFromSourceMetaClassAssignments(prefix, items);
+		}
+
 		if (isIncomplete) {
 			return CompletableFuture.completedFuture(Either.forRight(new CompletionList(true, items)));
 		}
 		return CompletableFuture.completedFuture(Either.forLeft(items));
 	}
 
+	private PropertyExpression findPropertyExpressionAtPosition(URI uri, Position position) {
+		if (ast == null || uri == null) {
+			return null;
+		}
+		List<ASTNode> nodes = ast.getNodes(uri);
+		if (nodes == null || nodes.isEmpty()) {
+			return null;
+		}
+		PropertyExpression best = null;
+		int bestStart = -1;
+		for (ASTNode node : nodes) {
+			if (!(node instanceof PropertyExpression)) {
+				continue;
+			}
+			PropertyExpression propExpr = (PropertyExpression) node;
+			Range propRange = GroovyLanguageServerUtils.astNodeToRange(propExpr.getProperty());
+			if (propRange == null) {
+				continue;
+			}
+			if (position.getLine() != propRange.getStart().getLine()) {
+				continue;
+			}
+			int startChar = propRange.getStart().getCharacter();
+			if (position.getCharacter() < startChar) {
+				continue;
+			}
+			if (startChar > bestStart) {
+				bestStart = startChar;
+				best = propExpr;
+			}
+		}
+		return best;
+	}
+
 	private void populateItemsFromPropertyExpression(PropertyExpression propExpr, Position position,
 			List<CompletionItem> items) {
 		Range propertyRange = GroovyLanguageServerUtils.astNodeToRange(propExpr.getProperty());
+		String memberName;
 		if (propertyRange == null) {
-			return;
+			memberName = getMemberNameFromSource(position);
+			if (memberName == null) {
+				return;
+			}
+		} else {
+			memberName = getMemberName(propExpr.getPropertyAsString(), propertyRange, position);
 		}
-		String memberName = getMemberName(propExpr.getPropertyAsString(), propertyRange, position);
 		populateItemsFromExpression(propExpr.getObjectExpression(), memberName, items);
 	}
 
@@ -356,6 +432,156 @@ public class CompletionProvider {
 
 		List<MethodNode> methods = GroovyASTUtils.getMethodsForLeftSideOfPropertyExpression(leftSide, ast);
 		populateItemsFromMethods(methods, memberNamePrefix, existingNames, items);
+
+		ClassNode leftType = GroovyASTUtils.getTypeOfNode(leftSide, ast);
+		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE) {
+			ClassNode fallback = leftSide.getType();
+			if (fallback != null && fallback != ClassHelper.DYNAMIC_TYPE) {
+				leftType = fallback;
+			}
+		}
+		if (leftType == null || leftType == ClassHelper.DYNAMIC_TYPE) {
+			ASTNode def = GroovyASTUtils.getDefinition(leftSide, false, ast);
+			if (def instanceof org.codehaus.groovy.ast.Variable) {
+				org.codehaus.groovy.ast.Variable variable = (org.codehaus.groovy.ast.Variable) def;
+				ClassNode origin = variable.getOriginType();
+				if (origin != null && origin != ClassHelper.DYNAMIC_TYPE) {
+					leftType = origin;
+				} else {
+					ClassNode varType = variable.getType();
+					if (varType != null && varType != ClassHelper.DYNAMIC_TYPE) {
+						leftType = varType;
+					}
+				}
+				if (leftType == null && def instanceof VariableExpression) {
+					VariableExpression varExpr = (VariableExpression) def;
+					if (varExpr.hasInitialExpression()) {
+						leftType = GroovyASTUtils.getTypeOfNode(varExpr.getInitialExpression(), ast);
+					}
+				}
+			}
+		}
+		if (leftType != null) {
+			populateItemsFromPropertiesAndFields(ast.getMetaClassProperties(leftType),
+					Collections.emptyList(), memberNamePrefix, existingNames, items);
+			populateItemsFromMethods(ast.getMetaClassMethods(leftType), memberNamePrefix, existingNames, items);
+		}
+		populateItemsFromMetaClassAssignments(leftType, memberNamePrefix, existingNames, items);
+		populateItemsFromSourceMetaClassAssignments(leftSide, leftType, memberNamePrefix, existingNames, items);
+		populateItemsFromSourceMetaClassAssignments(memberNamePrefix, items);
+	}
+
+	private void populateItemsFromSourceMetaClassAssignments(Expression leftSide, ClassNode leftType,
+			String memberNamePrefix, Set<String> existingNames, List<CompletionItem> items) {
+		if (files == null || ast == null || leftSide == null) {
+			return;
+		}
+		URI uri = ast.getURI(leftSide);
+		if (uri == null) {
+			uri = completionUri;
+		}
+		if (uri == null) {
+			return;
+		}
+		String text = files.getContents(uri);
+		if (text == null || text.isBlank()) {
+			return;
+		}
+		boolean matchAllTypes = leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+				|| leftType == ClassHelper.OBJECT_TYPE
+				|| "groovy.lang.GroovyObject".equals(leftType.getName());
+		String targetName = matchAllTypes ? null : leftType.getName();
+		String targetSimple = matchAllTypes ? null : leftType.getNameWithoutPackage();
+		Matcher matcher = METACLASS_METHOD_PATTERN.matcher(text);
+		while (matcher.find()) {
+			String className = matcher.group(1);
+			String methodName = matcher.group(2);
+			if (!matchAllTypes) {
+				boolean matches = className.equals(targetName)
+						|| (targetSimple != null && className.equals(targetSimple));
+				if (!matches) {
+					continue;
+				}
+			}
+			if (!methodName.startsWith(memberNamePrefix) || existingNames.contains(methodName)) {
+				continue;
+			}
+			CompletionItem item = new CompletionItem();
+			item.setLabel(methodName);
+			item.setKind(CompletionItemKind.Method);
+			items.add(item);
+			existingNames.add(methodName);
+		}
+	}
+
+	private void populateItemsFromMetaClassAssignments(ClassNode leftType, String memberNamePrefix,
+			Set<String> existingNames, List<CompletionItem> items) {
+		boolean matchAllTypes = leftType == null || leftType == ClassHelper.DYNAMIC_TYPE
+				|| leftType == ClassHelper.OBJECT_TYPE
+				|| "groovy.lang.GroovyObject".equals(leftType.getName());
+		String targetName = matchAllTypes ? null : leftType.getName();
+		String targetSimple = matchAllTypes ? null : leftType.getNameWithoutPackage();
+		for (ASTNode node : ast.getNodes()) {
+			if (!(node instanceof BinaryExpression)) {
+				continue;
+			}
+			BinaryExpression binary = (BinaryExpression) node;
+			if (binary.getOperation() == null || !"=".equals(binary.getOperation().getText())) {
+				continue;
+			}
+			if (!(binary.getLeftExpression() instanceof PropertyExpression)) {
+				continue;
+			}
+			PropertyExpression left = (PropertyExpression) binary.getLeftExpression();
+			String methodName = left.getPropertyAsString();
+			if (methodName == null) {
+				continue;
+			}
+			if (!(left.getObjectExpression() instanceof PropertyExpression)) {
+				continue;
+			}
+			PropertyExpression metaClassExpr = (PropertyExpression) left.getObjectExpression();
+			if (!"metaClass".equals(metaClassExpr.getPropertyAsString())) {
+				continue;
+			}
+			String className = null;
+			Expression targetExpr = metaClassExpr.getObjectExpression();
+			if (targetExpr instanceof ClassExpression) {
+				ClassNode exprType = ((ClassExpression) targetExpr).getType();
+				if (exprType != null) {
+					if (exprType.redirect() == ClassHelper.CLASS_Type) {
+						String exprText = targetExpr.getText();
+						if (exprText != null && exprText.endsWith(".class")) {
+							exprText = exprText.substring(0, exprText.length() - ".class".length());
+						}
+						className = exprText;
+					} else {
+						className = exprType.getName();
+					}
+				}
+			} else if (targetExpr instanceof VariableExpression) {
+				className = ((VariableExpression) targetExpr).getName();
+			}
+			if (className == null && !matchAllTypes) {
+				continue;
+			}
+			boolean matches = matchAllTypes || className.equals(targetName)
+					|| (targetSimple != null && className.equals(targetSimple));
+			if (!matches) {
+				continue;
+			}
+			if (!(binary.getRightExpression() instanceof ClosureExpression)) {
+				continue;
+			}
+			if (!methodName.startsWith(memberNamePrefix) || existingNames.contains(methodName)) {
+				continue;
+			}
+			CompletionItem item = new CompletionItem();
+			item.setLabel(methodName);
+			item.setKind(CompletionItemKind.Method);
+			items.add(item);
+			existingNames.add(methodName);
+		}
 	}
 
 	private void populateItemsFromVariableScope(VariableScope variableScope, String memberNamePrefix,
@@ -404,7 +630,9 @@ public class CompletionProvider {
 			current = ast.getParent(current);
 		}
 		populateKeywordItems(namePrefix, existingNames, items);
-		populateTypes(node, namePrefix, existingNames, items);
+		if (namePrefix != null && !namePrefix.isEmpty()) {
+			populateTypes(node, namePrefix, existingNames, items);
+		}
 	}
 
 	private void populateKeywordItems(String namePrefix, Set<String> existingNames, List<CompletionItem> items) {
@@ -521,6 +749,80 @@ public class CompletionProvider {
 			}
 		}
 		return "";
+	}
+
+	private String getMemberNameFromSource(Position position) {
+		if (files == null || completionUri == null) {
+			return null;
+		}
+		String text = files.getContents(completionUri);
+		if (text == null) {
+			return null;
+		}
+		int offset = Positions.getOffset(text, position);
+		int lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1));
+		lineStart = lineStart == -1 ? 0 : lineStart + 1;
+		int lineEnd = text.indexOf('\n', offset);
+		if (lineEnd == -1) {
+			lineEnd = text.length();
+		}
+		String line = text.substring(lineStart, lineEnd);
+		int column = position.getCharacter();
+		if (column > line.length()) {
+			column = line.length();
+		}
+		int lastDot = line.lastIndexOf('.', Math.max(0, column - 1));
+		if (lastDot == -1) {
+			return "";
+		}
+		return line.substring(lastDot + 1, column).trim();
+	}
+
+	private boolean hasMemberAccessInSource(Position position) {
+		if (files == null || completionUri == null) {
+			return false;
+		}
+		String text = files.getContents(completionUri);
+		if (text == null) {
+			return false;
+		}
+		int offset = Positions.getOffset(text, position);
+		int lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1));
+		lineStart = lineStart == -1 ? 0 : lineStart + 1;
+		int lineEnd = text.indexOf('\n', offset);
+		if (lineEnd == -1) {
+			lineEnd = text.length();
+		}
+		String line = text.substring(lineStart, lineEnd);
+		int column = position.getCharacter();
+		if (column > line.length()) {
+			column = line.length();
+		}
+		int lastDot = line.lastIndexOf('.', Math.max(0, column - 1));
+		return lastDot != -1;
+	}
+
+	private void populateItemsFromSourceMetaClassAssignments(String memberNamePrefix, List<CompletionItem> items) {
+		if (files == null || completionUri == null) {
+			return;
+		}
+		String text = files.getContents(completionUri);
+		if (text == null || text.isBlank()) {
+			return;
+		}
+		Matcher matcher = METACLASS_METHOD_PATTERN.matcher(text);
+		while (matcher.find()) {
+			String methodName = matcher.group(2);
+			boolean hasMethod = items.stream().anyMatch(item -> methodName.equals(item.getLabel())
+					&& CompletionItemKind.Method.equals(item.getKind()));
+			if (!methodName.startsWith(memberNamePrefix) || hasMethod) {
+				continue;
+			}
+			CompletionItem item = new CompletionItem();
+			item.setLabel(methodName);
+			item.setKind(CompletionItemKind.Method);
+			items.add(item);
+		}
 	}
 
 	private CompletionItemKind classInfoToCompletionItemKind(ClassInfo classInfo) {

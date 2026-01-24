@@ -285,7 +285,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		CompletableFuture<Either<List<CompletionItem>, CompletionList>> result = null;
 		try {
-			CompletionProvider provider = new CompletionProvider(astVisitor, classGraphScanResult);
+			CompletionProvider provider = new CompletionProvider(astVisitor, classGraphScanResult, fileContentsTracker);
 			result = provider.provideCompletion(params.getTextDocument(), params.getPosition(), params.getContext());
 		} finally {
 			if (originalSource != null) {

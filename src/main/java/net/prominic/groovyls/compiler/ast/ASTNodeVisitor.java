@@ -19,6 +19,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 package net.prominic.groovyls.compiler.ast;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.Reader;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.AnnotatedNode;
@@ -40,6 +45,7 @@ import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.ModuleNode;
 import org.codehaus.groovy.ast.Parameter;
 import org.codehaus.groovy.ast.PropertyNode;
+import org.codehaus.groovy.ast.ClassHelper;
 import org.codehaus.groovy.ast.expr.ArrayExpression;
 import org.codehaus.groovy.ast.expr.AttributeExpression;
 import org.codehaus.groovy.ast.expr.BinaryExpression;
@@ -52,6 +58,7 @@ import org.codehaus.groovy.ast.expr.ClosureListExpression;
 import org.codehaus.groovy.ast.expr.ConstantExpression;
 import org.codehaus.groovy.ast.expr.ConstructorCallExpression;
 import org.codehaus.groovy.ast.expr.ElvisOperatorExpression;
+import org.codehaus.groovy.ast.expr.Expression;
 import org.codehaus.groovy.ast.expr.FieldExpression;
 import org.codehaus.groovy.ast.expr.GStringExpression;
 import org.codehaus.groovy.ast.expr.ListExpression;
@@ -100,6 +107,9 @@ import net.prominic.lsp.utils.Positions;
 import net.prominic.lsp.utils.Ranges;
 
 public class ASTNodeVisitor extends ClassCodeVisitorSupport {
+	private static final Pattern METACLASS_METHOD_PATTERN = Pattern
+			.compile("([A-Za-z_][\\w\\.]*)\\.metaClass\\.([A-Za-z_][\\w]*)\\s*=\\s*\\{");
+
 	private class ASTLookupKey {
 		public ASTLookupKey(ASTNode node) {
 			this.node = node;
@@ -137,6 +147,10 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 	private Map<URI, List<ASTNode>> nodesByURI = new HashMap<>();
 	private Map<URI, List<ClassNode>> classNodesByURI = new HashMap<>();
 	private Map<ASTLookupKey, ASTNodeLookupData> lookup = new HashMap<>();
+	private Map<String, Map<String, MethodNode>> metaClassMethodsByType = new HashMap<>();
+	private Map<String, Map<String, PropertyNode>> metaClassPropertiesByType = new HashMap<>();
+	private Map<URI, Map<String, Map<String, MethodNode>>> metaClassMethodsByURI = new HashMap<>();
+	private Map<URI, Map<String, Map<String, PropertyNode>>> metaClassPropertiesByURI = new HashMap<>();
 
 	private void pushASTNode(ASTNode node) {
 		boolean isSynthetic = false;
@@ -185,6 +199,34 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 			return Collections.emptyList();
 		}
 		return nodes;
+	}
+
+	public List<MethodNode> getMetaClassMethods(ClassNode classNode) {
+		if (classNode == null) {
+			return Collections.emptyList();
+		}
+		Map<String, MethodNode> methods = metaClassMethodsByType.get(classNode.getName());
+		if (methods == null && classNode.getNameWithoutPackage() != null) {
+			methods = metaClassMethodsByType.get(classNode.getNameWithoutPackage());
+		}
+		if (methods == null) {
+			return Collections.emptyList();
+		}
+		return new ArrayList<>(methods.values());
+	}
+
+	public List<PropertyNode> getMetaClassProperties(ClassNode classNode) {
+		if (classNode == null) {
+			return Collections.emptyList();
+		}
+		Map<String, PropertyNode> props = metaClassPropertiesByType.get(classNode.getName());
+		if (props == null && classNode.getNameWithoutPackage() != null) {
+			props = metaClassPropertiesByType.get(classNode.getNameWithoutPackage());
+		}
+		if (props == null) {
+			return Collections.emptyList();
+		}
+		return new ArrayList<>(props.values());
 	}
 
 	public ASTNode getNodeAtLineAndColumn(URI uri, int line, int column) {
@@ -275,6 +317,10 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		nodesByURI.clear();
 		classNodesByURI.clear();
 		lookup.clear();
+		metaClassMethodsByType.clear();
+		metaClassPropertiesByType.clear();
+		metaClassMethodsByURI.clear();
+		metaClassPropertiesByURI.clear();
 		unit.iterator().forEachRemaining(sourceUnit -> {
 			visitSourceUnit(sourceUnit);
 		});
@@ -290,6 +336,7 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 				});
 			}
 			classNodesByURI.remove(uri);
+			removeMetaClassEntriesForUri(uri);
 		});
 		unit.iterator().forEachRemaining(sourceUnit -> {
 			URI uri = sourceUnit.getSource().getURI();
@@ -298,6 +345,33 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 			}
 			visitSourceUnit(sourceUnit);
 		});
+	}
+
+	private void removeMetaClassEntriesForUri(URI uri) {
+		Map<String, Map<String, MethodNode>> methodsByType = metaClassMethodsByURI.remove(uri);
+		if (methodsByType != null) {
+			methodsByType.forEach((typeName, methods) -> {
+				Map<String, MethodNode> existing = metaClassMethodsByType.get(typeName);
+				if (existing != null) {
+					methods.keySet().forEach(existing::remove);
+					if (existing.isEmpty()) {
+						metaClassMethodsByType.remove(typeName);
+					}
+				}
+			});
+		}
+		Map<String, Map<String, PropertyNode>> propsByType = metaClassPropertiesByURI.remove(uri);
+		if (propsByType != null) {
+			propsByType.forEach((typeName, props) -> {
+				Map<String, PropertyNode> existing = metaClassPropertiesByType.get(typeName);
+				if (existing != null) {
+					props.keySet().forEach(existing::remove);
+					if (existing.isEmpty()) {
+						metaClassPropertiesByType.remove(typeName);
+					}
+				}
+			});
+		}
 	}
 
 	public void visitSourceUnit(SourceUnit unit) {
@@ -310,8 +384,71 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 		if (moduleNode != null) {
 			visitModule(moduleNode);
 		}
+		captureMetaClassAssignmentsFromSource();
 		sourceUnit = null;
 		stack.clear();
+	}
+
+	private void captureMetaClassAssignmentsFromSource() {
+		if (sourceUnit == null || sourceUnit.getSource() == null) {
+			return;
+		}
+		String text = readSourceText();
+		if (text == null || text.isBlank()) {
+			return;
+		}
+		Matcher matcher = METACLASS_METHOD_PATTERN.matcher(text);
+		while (matcher.find()) {
+			String className = matcher.group(1);
+			String methodName = matcher.group(2);
+			ClassNode targetType = null;
+			for (ClassNode classNode : getClassNodes()) {
+				if (className.equals(classNode.getName())
+						|| className.equals(classNode.getNameWithoutPackage())) {
+					targetType = classNode;
+					break;
+				}
+			}
+			if (targetType == null) {
+				targetType = new ClassNode(className, 0, ClassHelper.OBJECT_TYPE);
+			}
+			MethodNode methodNode = new MethodNode(methodName, 0, ClassHelper.DYNAMIC_TYPE, new Parameter[0],
+					new ClassNode[0], null);
+			methodNode.setDeclaringClass(targetType);
+			if (targetType.getMethods(methodName).isEmpty()) {
+				targetType.addMethod(methodNode);
+			}
+			metaClassMethodsByType.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(methodName,
+					methodNode);
+			String simpleName = targetType.getNameWithoutPackage();
+			if (simpleName != null && !simpleName.equals(targetType.getName())) {
+				metaClassMethodsByType.computeIfAbsent(simpleName, key -> new HashMap<>()).put(methodName, methodNode);
+			}
+			URI uri = sourceUnit.getSource().getURI();
+			if (uri != null) {
+				metaClassMethodsByURI.computeIfAbsent(uri, key -> new HashMap<>())
+						.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(methodName, methodNode);
+				if (simpleName != null && !simpleName.equals(targetType.getName())) {
+					metaClassMethodsByURI.computeIfAbsent(uri, key -> new HashMap<>())
+							.computeIfAbsent(simpleName, key -> new HashMap<>()).put(methodName, methodNode);
+				}
+			}
+		}
+	}
+
+	private String readSourceText() {
+		try (Reader reader = sourceUnit.getSource().getReader();
+				BufferedReader buffered = new BufferedReader(reader)) {
+			StringBuilder builder = new StringBuilder();
+			char[] buffer = new char[4096];
+			int read;
+			while ((read = buffered.read(buffer)) != -1) {
+				builder.append(buffer, 0, read);
+			}
+			return builder.toString();
+		} catch (IOException e) {
+			return null;
+		}
 	}
 
 	public void visitModule(ModuleNode node) {
@@ -320,6 +457,9 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 			node.getClasses().forEach(classInUnit -> {
 				visitClass(classInUnit);
 			});
+			if (node.getStatementBlock() != null) {
+				node.getStatementBlock().visit(this);
+			}
 		} finally {
 			popASTNode();
 		}
@@ -606,10 +746,144 @@ public class ASTNodeVisitor extends ClassCodeVisitorSupport {
 	public void visitBinaryExpression(BinaryExpression node) {
 		pushASTNode(node);
 		try {
+			captureMetaClassAssignment(node);
 			super.visitBinaryExpression(node);
 		} finally {
 			popASTNode();
 		}
+	}
+
+	private void captureMetaClassAssignment(BinaryExpression node) {
+		String operation = node.getOperation() != null ? node.getOperation().getText() : null;
+		if (!"=".equals(operation)) {
+			return;
+		}
+		if (!(node.getLeftExpression() instanceof PropertyExpression)) {
+			return;
+		}
+		PropertyExpression left = (PropertyExpression) node.getLeftExpression();
+		String propertyName = left.getPropertyAsString();
+		if (propertyName == null) {
+			return;
+		}
+		if (!(left.getObjectExpression() instanceof PropertyExpression)) {
+			return;
+		}
+		PropertyExpression metaClassExpr = (PropertyExpression) left.getObjectExpression();
+		String metaClassName = metaClassExpr.getPropertyAsString();
+		if (!"metaClass".equals(metaClassName)) {
+			return;
+		}
+		Expression targetExpr = metaClassExpr.getObjectExpression();
+		ClassNode targetType = null;
+		if (targetExpr instanceof ClassExpression) {
+			ClassNode exprType = ((ClassExpression) targetExpr).getType();
+			if (exprType != null && exprType.redirect() == ClassHelper.CLASS_Type
+					&& exprType.getGenericsTypes() != null && exprType.getGenericsTypes().length > 0) {
+				targetType = exprType.getGenericsTypes()[0].getType();
+			} else if (exprType != null && exprType.redirect() == ClassHelper.CLASS_Type) {
+				String exprText = targetExpr.getText();
+				targetType = resolveClassNodeByName(exprText);
+			} else {
+				targetType = exprType;
+			}
+		} else {
+			ASTNode def = net.prominic.groovyls.compiler.util.GroovyASTUtils.getDefinition(targetExpr, false, this);
+			if (def instanceof ClassNode) {
+				targetType = (ClassNode) def;
+			} else if (def instanceof VariableExpression) {
+				ClassNode originType = ((VariableExpression) def).getOriginType();
+				if (originType != null) {
+					targetType = originType;
+				}
+			}
+		}
+		if (targetType == null) {
+			String candidateName = null;
+			if (targetExpr instanceof VariableExpression) {
+				candidateName = ((VariableExpression) targetExpr).getName();
+			} else if (targetExpr instanceof ConstantExpression) {
+				candidateName = ((ConstantExpression) targetExpr).getText();
+			}
+			if (candidateName != null) {
+				for (ClassNode classNode : getClassNodes()) {
+					if (candidateName.equals(classNode.getName())
+							|| candidateName.equals(classNode.getNameWithoutPackage())) {
+						targetType = classNode;
+						break;
+					}
+				}
+			}
+			if (targetType == null && candidateName != null) {
+				targetType = new ClassNode(candidateName, 0, ClassHelper.OBJECT_TYPE);
+			}
+			if (targetType == null) {
+				return;
+			}
+		}
+		URI uri = sourceUnit != null ? sourceUnit.getSource().getURI() : null;
+		if (node.getRightExpression() instanceof ClosureExpression) {
+			MethodNode methodNode = new MethodNode(propertyName, 0, ClassHelper.DYNAMIC_TYPE, new Parameter[0],
+					new ClassNode[0], null);
+			methodNode.setDeclaringClass(targetType);
+			if (targetType.getMethods(propertyName).isEmpty()) {
+				targetType.addMethod(methodNode);
+			}
+			metaClassMethodsByType.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(propertyName,
+					methodNode);
+			String simpleName = targetType.getNameWithoutPackage();
+			if (simpleName != null && !simpleName.equals(targetType.getName())) {
+				metaClassMethodsByType.computeIfAbsent(simpleName, key -> new HashMap<>()).put(propertyName,
+						methodNode);
+			}
+			if (uri != null) {
+				metaClassMethodsByURI.computeIfAbsent(uri, key -> new HashMap<>())
+						.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(propertyName, methodNode);
+				if (simpleName != null && !simpleName.equals(targetType.getName())) {
+					metaClassMethodsByURI.computeIfAbsent(uri, key -> new HashMap<>())
+							.computeIfAbsent(simpleName, key -> new HashMap<>()).put(propertyName, methodNode);
+				}
+			}
+		} else {
+			PropertyNode propNode = new PropertyNode(propertyName, 0, ClassHelper.DYNAMIC_TYPE,
+					targetType, null, null, null);
+			propNode.setDeclaringClass(targetType);
+			if (targetType.getProperty(propertyName) == null) {
+				targetType.addProperty(propNode);
+			}
+			metaClassPropertiesByType.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(propertyName,
+					propNode);
+			String simpleName = targetType.getNameWithoutPackage();
+			if (simpleName != null && !simpleName.equals(targetType.getName())) {
+				metaClassPropertiesByType.computeIfAbsent(simpleName, key -> new HashMap<>()).put(propertyName,
+						propNode);
+			}
+			if (uri != null) {
+				metaClassPropertiesByURI.computeIfAbsent(uri, key -> new HashMap<>())
+						.computeIfAbsent(targetType.getName(), key -> new HashMap<>()).put(propertyName, propNode);
+				if (simpleName != null && !simpleName.equals(targetType.getName())) {
+					metaClassPropertiesByURI.computeIfAbsent(uri, key -> new HashMap<>())
+							.computeIfAbsent(simpleName, key -> new HashMap<>()).put(propertyName, propNode);
+				}
+			}
+		}
+	}
+
+	private ClassNode resolveClassNodeByName(String className) {
+		if (className == null || className.isBlank()) {
+			return null;
+		}
+		String normalized = className.trim();
+		if (normalized.endsWith(".class")) {
+			normalized = normalized.substring(0, normalized.length() - ".class".length());
+		}
+		for (ClassNode classNode : getClassNodes()) {
+			if (normalized.equals(classNode.getName())
+					|| normalized.equals(classNode.getNameWithoutPackage())) {
+				return classNode;
+			}
+		}
+		return new ClassNode(normalized, 0, ClassHelper.OBJECT_TYPE);
 	}
 
 	public void visitTernaryExpression(TernaryExpression node) {
