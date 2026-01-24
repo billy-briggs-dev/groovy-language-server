@@ -1019,7 +1019,18 @@ public class GroovyASTUtils {
     private static ClassNode resolveCallOwnerType(MethodCallExpression call, ASTNodeVisitor astVisitor) {
         ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
         if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
-            owner = ((ClassExpression) call.getObjectExpression()).getType();
+            ClassExpression classExpr = (ClassExpression) call.getObjectExpression();
+            ClassNode exprType = classExpr.getType();
+            ClassNode resolved = null;
+            if (exprType != null && exprType.redirect() == ClassHelper.CLASS_Type) {
+                resolved = resolveClassNodeFromExpression(classExpr);
+            } else {
+                resolved = exprType;
+            }
+            if (resolved != null) {
+                ClassNode found = findClassNodeByName(resolved.getName(), astVisitor);
+                owner = found != null ? found : resolved;
+            }
         }
         if (owner == null && call.getObjectExpression() instanceof VariableExpression) {
             String name = ((VariableExpression) call.getObjectExpression()).getName();
@@ -1144,20 +1155,7 @@ public class GroovyASTUtils {
         if (methodName == null) {
             return null;
         }
-        ClassNode owner = getTypeOfNode(call.getObjectExpression(), astVisitor);
-        if (owner == null && call.getObjectExpression() instanceof ClassExpression) {
-            owner = ((ClassExpression) call.getObjectExpression()).getType();
-        }
-        if (owner == null && call.getObjectExpression() instanceof VariableExpression) {
-            String name = ((VariableExpression) call.getObjectExpression()).getName();
-            owner = findClassNodeByName(name, astVisitor);
-        }
-        if (owner == null && call.isImplicitThis()) {
-            ASTNode enclosingClass = getEnclosingNodeOfType(call, ClassNode.class, astVisitor);
-            if (enclosingClass instanceof ClassNode) {
-                owner = (ClassNode) enclosingClass;
-            }
-        }
+        ClassNode owner = resolveCallOwnerType(call, astVisitor);
         if (owner == null) {
             return null;
         }

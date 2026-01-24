@@ -254,6 +254,9 @@ public class CompletionProvider {
 		}
 		String memberName = getMemberName(methodCallExpr.getMethodAsString(), methodRange, position);
 		populateItemsFromExpression(methodCallExpr.getObjectExpression(), memberName, items);
+		if (methodCallExpr.isImplicitThis()) {
+			populateDslContextItems(methodCallExpr, memberName, collectExistingNames(items), items);
+		}
 	}
 
 	private void populateItemsFromImportNode(ImportNode importNode, Position position, List<CompletionItem> items) {
@@ -713,6 +716,16 @@ public class CompletionProvider {
 		populateItemsFromPropertiesAndFields(ast.getMetaClassProperties(delegateType), Collections.emptyList(),
 				prefix, existingNames, items);
 		populateItemsFromMethods(ast.getMetaClassMethods(delegateType), prefix, existingNames, items);
+	}
+
+	private Set<String> collectExistingNames(List<CompletionItem> items) {
+		Set<String> existingNames = new HashSet<>();
+		for (CompletionItem item : items) {
+			if (item != null && item.getLabel() != null) {
+				existingNames.add(item.getLabel());
+			}
+		}
+		return existingNames;
 	}
 
 	private void populateKeywordItems(String namePrefix, Set<String> existingNames, List<CompletionItem> items) {
