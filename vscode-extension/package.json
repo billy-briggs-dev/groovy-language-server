@@ -114,6 +114,21 @@
         "command": "groovy.restartServer",
         "title": "Restart Groovy language server",
         "category": "Groovy"
+      },
+      {
+        "command": "groovy.addClasspathJars",
+        "title": "Add JARs to Groovy classpath",
+        "category": "Groovy"
+      },
+      {
+        "command": "groovy.addMavenDependency",
+        "title": "Add Maven dependency",
+        "category": "Groovy"
+      },
+      {
+        "command": "groovy.addMavenRepository",
+        "title": "Add Maven repository",
+        "category": "Groovy"
       }
     ],
     "configuration": {
@@ -169,6 +184,43 @@
           "type": "boolean",
           "default": false,
           "description": "Insert spaces inside brace blocks."
+        },
+        "groovy.classpathRecursive": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, classpath folders are searched recursively for .jar files."
+        },
+        "groovy.excludePatterns": {
+          "type": "array",
+          "default": null,
+          "description": "Glob patterns for files/folders to exclude from project scanning.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "groovy.sourceRoots": {
+          "type": "array",
+          "default": null,
+          "description": "Explicit source roots to scan. If empty, common Groovy roots (src/main/groovy, src/test/groovy) are auto-detected.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "groovy.maven.repositories": {
+          "type": "array",
+          "default": null,
+          "description": "Maven repository URLs to resolve dependencies.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "groovy.maven.dependencies": {
+          "type": "array",
+          "default": null,
+          "description": "Maven dependency coordinates (group:artifact:version[:classifier][@ext]).",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

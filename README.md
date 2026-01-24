@@ -27,6 +27,11 @@ The following configuration options are supported:
 - groovy.formatting.spaceAroundOperators (`boolean` - spacing around operators)
 - groovy.formatting.spaceAfterCommas (`boolean` - spacing after commas)
 - groovy.formatting.spaceInsideBraces (`boolean` - spacing inside braces)
+- groovy.classpathRecursive (`boolean` - when true, classpath folders are searched recursively for _.jar_ files)
+- groovy.excludePatterns (`string[]` - glob patterns to exclude from project scanning)
+- groovy.sourceRoots (`string[]` - explicit source roots; defaults to auto-detecting _src/main/groovy_ and _src/test/groovy_)
+- groovy.maven.repositories (`string[]` - Maven repository URLs)
+- groovy.maven.dependencies (`string[]` - Maven coordinates: `group:artifact:version[:classifier][@ext]`)
 
 ## Build
 

@@ -36,6 +36,12 @@ public interface ICompilationUnitFactory {
 
 	public void setAdditionalClasspathList(List<String> classpathList);
 
+	public void setClasspathRecursive(boolean classpathRecursive);
+
+	public void setExcludePatterns(List<String> excludePatterns);
+
+	public void setSourceRoots(List<String> sourceRoots);
+
 	/**
 	 * Returns a compilation unit.
 	 */

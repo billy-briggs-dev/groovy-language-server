@@ -142,6 +142,7 @@ import net.prominic.groovyls.util.GradleClasspathResolver;
 import net.prominic.groovyls.util.GradleProjectDetector;
 import net.prominic.groovyls.util.GradleProjectInfo;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
+import net.prominic.groovyls.util.MavenDependencyResolver;
 import net.prominic.lsp.utils.Positions;
 
 public class GroovyServices implements TextDocumentService, WorkspaceService, LanguageClientAware {
@@ -177,6 +178,12 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private GradleProjectInfo gradleProjectInfo;
 	private List<String> userClasspathList = new ArrayList<>();
 	private List<String> gradleClasspathList = Collections.emptyList();
+	private List<String> mavenClasspathList = Collections.emptyList();
+	private List<String> excludePatterns = new ArrayList<>();
+	private List<String> sourceRoots = new ArrayList<>();
+	private List<String> mavenRepositories = new ArrayList<>();
+	private List<String> mavenDependencies = new ArrayList<>();
+	private boolean classpathRecursive = false;
 	private final ScheduledExecutorService compileScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
 		Thread thread = new Thread(r, "groovyls-compile");
 		thread.setDaemon(true);
@@ -262,25 +269,77 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			return;
 		}
 		JsonObject settings = (JsonObject) params.getSettings();
-		this.updateClasspath(settings);
+		this.updateConfiguration(settings);
 		this.updateFormattingSettings(settings);
 	}
 
-	private void updateClasspath(JsonObject settings) {
+	private void updateConfiguration(JsonObject settings) {
+		List<String> prevExcludePatterns = new ArrayList<>(excludePatterns);
+		List<String> prevSourceRoots = new ArrayList<>(sourceRoots);
+		boolean prevClasspathRecursive = classpathRecursive;
+
 		List<String> classpathList = new ArrayList<>();
+		List<String> nextExcludePatterns = new ArrayList<>();
+		List<String> nextSourceRoots = new ArrayList<>();
+		List<String> nextMavenRepositories = new ArrayList<>();
+		List<String> nextMavenDependencies = new ArrayList<>();
+		boolean nextClasspathRecursive = false;
 
 		if (settings.has("groovy") && settings.get("groovy").isJsonObject()) {
 			JsonObject groovy = settings.get("groovy").getAsJsonObject();
-			if (groovy.has("classpath") && groovy.get("classpath").isJsonArray()) {
-				JsonArray classpath = groovy.get("classpath").getAsJsonArray();
-				classpath.forEach(element -> {
-					classpathList.add(element.getAsString());
-				});
+			classpathList.addAll(readStringArray(groovy, "classpath"));
+			nextExcludePatterns.addAll(readStringArray(groovy, "excludePatterns"));
+			nextSourceRoots.addAll(readStringArray(groovy, "sourceRoots"));
+			if (groovy.has("classpathRecursive") && groovy.get("classpathRecursive").isJsonPrimitive()) {
+				nextClasspathRecursive = groovy.get("classpathRecursive").getAsBoolean();
+			}
+			if (groovy.has("maven") && groovy.get("maven").isJsonObject()) {
+				JsonObject maven = groovy.get("maven").getAsJsonObject();
+				nextMavenRepositories.addAll(readStringArray(maven, "repositories"));
+				nextMavenDependencies.addAll(readStringArray(maven, "dependencies"));
 			}
 		}
 
 		userClasspathList = classpathList;
+		excludePatterns = nextExcludePatterns;
+		sourceRoots = nextSourceRoots;
+		mavenRepositories = nextMavenRepositories;
+		mavenDependencies = nextMavenDependencies;
+		classpathRecursive = nextClasspathRecursive;
+
+		compilationUnitFactory.setExcludePatterns(excludePatterns);
+		compilationUnitFactory.setSourceRoots(sourceRoots);
+		compilationUnitFactory.setClasspathRecursive(classpathRecursive);
+
+		mavenClasspathList = MavenDependencyResolver.resolve(mavenDependencies, mavenRepositories);
 		applyEffectiveClasspath();
+
+		boolean structureChanged = !prevExcludePatterns.equals(excludePatterns)
+				|| !prevSourceRoots.equals(sourceRoots)
+				|| prevClasspathRecursive != classpathRecursive;
+		if (structureChanged) {
+			boolean isSameUnit = createOrUpdateCompilationUnit();
+			compile();
+			if (isSameUnit) {
+				visitAST();
+			} else {
+				visitAST();
+			}
+			previousContext = null;
+		}
+	}
+
+	private List<String> readStringArray(JsonObject parent, String key) {
+		List<String> values = new ArrayList<>();
+		if (parent == null || key == null) {
+			return values;
+		}
+		if (!parent.has(key) || !parent.get(key).isJsonArray()) {
+			return values;
+		}
+		JsonArray array = parent.get(key).getAsJsonArray();
+		array.forEach(element -> values.add(element.getAsString()));
+		return values;
 	}
 
 	private void updateFormattingSettings(JsonObject settings) {
@@ -617,6 +676,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	private void applyEffectiveClasspath() {
 		List<String> merged = GradleClasspathResolver.mergeClasspath(userClasspathList, gradleClasspathList);
+		merged = GradleClasspathResolver.mergeClasspath(merged, mavenClasspathList);
 		List<String> existing = compilationUnitFactory.getAdditionalClasspathList();
 		if (existing == null) {
 			existing = Collections.emptyList();
