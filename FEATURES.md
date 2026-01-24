@@ -127,19 +127,19 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 ### 8. **Navigation**
 - [x] **Go to definition** (exists)
 - [x] **Find references** (exists but limited)
-- [ ] **Find usages**
+- [x] **Find usages**
   - Show usages in tree view
   - Filter by type (method calls, field access, etc.)
-  
-- [ ] **Go to implementation**
-- [ ] **Go to type definition**
-- [ ] **Go to super method**
-- [ ] **Find symbol** (workspace-wide)
-- [ ] **File structure**
+
+- [x] **Go to implementation**
+- [x] **Go to type definition**
+- [x] **Go to super method**
+- [x] **Find symbol** (workspace-wide)
+- [x] **File structure**
   - Outline view of current file
-  
-- [ ] **Type hierarchy**
-- [ ] **Call hierarchy**
+
+- [x] **Type hierarchy**
+- [x] **Call hierarchy**
 
 ### 9. **Documentation**
 - [x] **Hover for documentation** (exists)
