@@ -24,6 +24,7 @@ shadowJar {
 
 repositories  {
   mavenCentral()
+  maven { url "https://repo.gradle.org/gradle/libs-releases" }
 }
 
 dependencies {
@@ -32,6 +33,7 @@ dependencies {
   implementation "org.apache.groovy:groovy:4.0.26"
   implementation "com.google.code.gson:gson:2.13.1"
   implementation "io.github.classgraph:classgraph:4.8.179"
+  implementation "org.gradle:gradle-tooling-api:9.3.0"
   testImplementation platform("org.junit:junit-bom:5.11.4")
   testImplementation "org.junit.jupiter:junit-jupiter-api"
   testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"

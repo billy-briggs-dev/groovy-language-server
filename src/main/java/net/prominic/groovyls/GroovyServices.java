@@ -108,6 +108,7 @@ import net.prominic.groovyls.providers.SignatureHelpProvider;
 import net.prominic.groovyls.providers.TypeDefinitionProvider;
 import net.prominic.groovyls.providers.WorkspaceSymbolProvider;
 import net.prominic.groovyls.util.FileContentsTracker;
+import net.prominic.groovyls.util.GradleClasspathResolver;
 import net.prominic.groovyls.util.GradleProjectDetector;
 import net.prominic.groovyls.util.GradleProjectInfo;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
@@ -129,6 +130,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	private GroovyClassLoader classLoader = null;
 	private URI previousContext = null;
 	private GradleProjectInfo gradleProjectInfo;
+	private List<String> userClasspathList = new ArrayList<>();
+	private List<String> gradleClasspathList = Collections.emptyList();
 	private final ScheduledExecutorService compileScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
 		Thread thread = new Thread(r, "groovyls-compile");
 		thread.setDaemon(true);
@@ -217,14 +220,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			}
 		}
 
-		if (!classpathList.equals(compilationUnitFactory.getAdditionalClasspathList())) {
-			compilationUnitFactory.setAdditionalClasspathList(classpathList);
-
-			createOrUpdateCompilationUnit();
-			compile();
-			visitAST();
-			previousContext = null;
-		}
+		userClasspathList = classpathList;
+		applyEffectiveClasspath();
 	}
 
 	// --- REQUESTS
@@ -500,6 +497,24 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 	private void detectGradleProject() {
 		gradleProjectInfo = GradleProjectDetector.detect(workspaceRoot);
+		gradleClasspathList = GradleClasspathResolver.resolve(gradleProjectInfo);
+		applyEffectiveClasspath();
+	}
+
+	private void applyEffectiveClasspath() {
+		List<String> merged = GradleClasspathResolver.mergeClasspath(userClasspathList, gradleClasspathList);
+		List<String> existing = compilationUnitFactory.getAdditionalClasspathList();
+		if (existing == null) {
+			existing = Collections.emptyList();
+		}
+		if (!merged.equals(existing)) {
+			compilationUnitFactory.setAdditionalClasspathList(merged);
+
+			createOrUpdateCompilationUnit();
+			compile();
+			visitAST();
+			previousContext = null;
+		}
 	}
 
 	private void compileAndVisitAST(URI contextURI) {
