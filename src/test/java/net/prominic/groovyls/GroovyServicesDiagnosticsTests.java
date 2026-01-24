@@ -162,4 +162,57 @@ class GroovyServicesDiagnosticsTests {
 		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
 				.anyMatch(diag -> "Undefined variable: missingVar".equals(diag.getMessage())));
 	}
+
+	@Test
+	void testCodeInspectionDiagnostics() throws Exception {
+		Path filePath = srcRoot.resolve("Inspection.groovy");
+		String uri = filePath.toUri().toString();
+		String longText = "a".repeat(130);
+		String source = String.join("\n",
+				"import java.util.Map as Alias",
+				"",
+				"class Inspection {",
+				"  void emptyMethod() { }",
+				"  void testMethod() {",
+				"    String value = (String) 'hello'",
+				"    boolean flag = true",
+				"    if (flag == true) {",
+				"      println value",
+				"    }",
+				"    if (flag) { }",
+				"    ;",
+				"    def trailing = 1  ",
+				"    def longLine = '" + longText + "'",
+				"  }",
+				"  void dupOne() {",
+				"    println 'dup'",
+				"  }",
+				"  void dupTwo() {",
+				"    println 'dup'",
+				"  }",
+				"}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, source);
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		boolean published = publishLatch.await(2, TimeUnit.SECONDS);
+		Assertions.assertTrue(published, "Expected diagnostics to be published");
+		PublishDiagnosticsParams diagnostics = lastDiagnostics.get();
+		Assertions.assertNotNull(diagnostics);
+		Assertions.assertEquals(uri, diagnostics.getUri());
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Unused import: Alias".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Redundant cast".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Unnecessary semicolon".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Empty block".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Duplicate code detected".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Line exceeds 120 characters".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Trailing whitespace".equals(diag.getMessage())));
+		Assertions.assertTrue(diagnostics.getDiagnostics().stream()
+				.anyMatch(diag -> "Simplify boolean comparison".equals(diag.getMessage())));
+	}
 }
