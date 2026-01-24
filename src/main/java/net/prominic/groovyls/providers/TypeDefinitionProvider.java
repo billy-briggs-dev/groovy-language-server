@@ -25,15 +25,19 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import org.codehaus.groovy.ast.ASTNode;
+import org.codehaus.groovy.ast.expr.MethodCallExpression;
+import org.codehaus.groovy.ast.expr.PropertyExpression;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.LocationLink;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 
 import net.prominic.groovyls.compiler.ast.ASTNodeVisitor;
 import net.prominic.groovyls.compiler.util.GroovyASTUtils;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
+import net.prominic.lsp.utils.Ranges;
 
 public class TypeDefinitionProvider {
 	private ASTNodeVisitor ast;
@@ -51,11 +55,16 @@ public class TypeDefinitionProvider {
 		}
 		URI uri = URI.create(textDocument.getUri());
 		ASTNode offsetNode = ast.getNodeAtLineAndColumn(uri, position.getLine(), position.getCharacter());
-		if (offsetNode == null) {
-			return CompletableFuture.completedFuture(Either.forLeft(Collections.emptyList()));
+		ASTNode definitionNode = null;
+		if (offsetNode != null) {
+			definitionNode = GroovyASTUtils.getTypeDefinition(offsetNode, ast);
 		}
-
-		ASTNode definitionNode = GroovyASTUtils.getTypeDefinition(offsetNode, ast);
+		if (definitionNode == null) {
+			ASTNode fallbackNode = findDefinitionNodeAtPosition(uri, position);
+			if (fallbackNode != null) {
+				definitionNode = GroovyASTUtils.getTypeDefinition(fallbackNode, ast);
+			}
+		}
 		if (definitionNode == null || definitionNode.getLineNumber() == -1 || definitionNode.getColumnNumber() == -1) {
 			return CompletableFuture.completedFuture(Either.forLeft(Collections.emptyList()));
 		}
@@ -71,5 +80,33 @@ public class TypeDefinitionProvider {
 		}
 
 		return CompletableFuture.completedFuture(Either.forLeft(Collections.singletonList(location)));
+	}
+
+	private ASTNode findDefinitionNodeAtPosition(URI uri, Position position) {
+		if (uri == null) {
+			return null;
+		}
+		ASTNode best = null;
+		Position bestStart = null;
+		for (ASTNode node : ast.getNodes(uri)) {
+			Range range = null;
+			if (node instanceof MethodCallExpression) {
+				range = GroovyLanguageServerUtils.astNodeToRange(((MethodCallExpression) node).getMethod());
+			} else if (node instanceof PropertyExpression) {
+				range = GroovyLanguageServerUtils.astNodeToRange(((PropertyExpression) node).getProperty());
+			} else {
+				range = GroovyLanguageServerUtils.astNodeToRange(node);
+			}
+			if (range == null || !Ranges.contains(range, position)) {
+				continue;
+			}
+			Position start = range.getStart();
+			if (bestStart == null || (start.getLine() > bestStart.getLine())
+					|| (start.getLine() == bestStart.getLine() && start.getCharacter() > bestStart.getCharacter())) {
+				bestStart = start;
+				best = node;
+			}
+		}
+		return best;
 	}
 }

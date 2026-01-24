@@ -12,7 +12,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - Support `methodMissing` and `propertyMissing`
   - Runtime method resolution
   
-- [ ] **AST Transformation support**
+- [x] **AST Transformation support**
   - `@Delegate`
   - `@Mixin`
   - `@Category`
@@ -21,11 +21,11 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - `@Canonical`
   - Custom AST transformations
 
-- [ ] **GString type inference**
+- [x] **GString type inference**
   - Proper type resolution for interpolated strings
   - Template support
 
-- [ ] **Closure delegate resolution**
+- [x] **Closure delegate resolution**
   - `@DelegatesTo` annotation support
   - DSL context inference (Gradle, Jenkins)
 
