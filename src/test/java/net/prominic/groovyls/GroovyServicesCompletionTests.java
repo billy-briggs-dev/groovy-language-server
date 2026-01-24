@@ -278,7 +278,7 @@ class GroovyServicesCompletionTests {
 		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
 		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
 		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
-		Position position = new Position(8, 6);
+		Position position = new Position(9, 7);
 		Either<List<CompletionItem>, CompletionList> result = services
 				.completion(new CompletionParams(textDocument, position)).get();
 		Assertions.assertTrue(result.isLeft());
@@ -308,7 +308,7 @@ class GroovyServicesCompletionTests {
 		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
 		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
 		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
-		Position position = new Position(9, 3);
+		Position position = new Position(9, 4);
 		Either<List<CompletionItem>, CompletionList> result = services
 				.completion(new CompletionParams(textDocument, position)).get();
 		Assertions.assertTrue(result.isLeft());

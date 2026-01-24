@@ -868,7 +868,7 @@ public class GroovyASTUtils {
             }
             if (node instanceof Parameter) {
                 ClassNode type = ((Parameter) node).getType();
-                return type != null ? type : null;
+                return type;
             }
             if (node instanceof ClassNode) {
                 return (ClassNode) node;
