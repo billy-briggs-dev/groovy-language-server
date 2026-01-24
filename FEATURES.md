@@ -56,7 +56,7 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
   - Distinguish between dynamic properties and errors
   
 - [ ] **Type inference**
-  - Local variable type inference
+  - [x] Local variable type inference
   - [x] Method return type inference
   - Generic type parameter inference
   - [x] Collection literal type inference

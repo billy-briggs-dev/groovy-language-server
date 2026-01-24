@@ -295,13 +295,39 @@ class GroovyServicesCompletionTests {
 		contents.append("  public Completion() {\n");
 		contents.append("    def map = [a: 'b']\n");
 		contents.append("    def value = map['a']\n");
-		contents.append("    value.\n");
+		contents.append("    value.charA\n");
 		contents.append("  }\n");
 		contents.append("}");
 		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
 		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
 		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
-		Position position = new Position(4, 10);
+		Position position = new Position(4, 15);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		Assertions.assertTrue(items.size() > 0);
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("charAt") && item.getKind().equals(CompletionItemKind.Method);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+	}
+
+	@Test
+	void testMemberAccessOnLocalVariableAfterAssignment() throws Exception {
+		Path filePath = srcRoot.resolve("Completion.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class Completion {\n");
+		contents.append("  public Completion() {\n");
+		contents.append("    def value = 'abc'\n");
+		contents.append("    value.charA\n");
+		contents.append("  }\n");
+		contents.append("}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(3, 15);
 		Either<List<CompletionItem>, CompletionList> result = services
 				.completion(new CompletionParams(textDocument, position)).get();
 		Assertions.assertTrue(result.isLeft());

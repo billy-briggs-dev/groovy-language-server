@@ -423,6 +423,11 @@ public class GroovyASTUtils {
             }
         } else if (node instanceof GStringExpression) {
             return ClassHelper.STRING_TYPE;
+        } else if (node instanceof ConstantExpression) {
+            ConstantExpression expression = (ConstantExpression) node;
+            if (expression.getValue() instanceof String) {
+                return ClassHelper.STRING_TYPE;
+            }
         } else if (node instanceof ListExpression) {
             ListExpression expression = (ListExpression) node;
             ClassNode elementType = inferCommonType(expression.getExpressions(), astVisitor);
@@ -491,7 +496,8 @@ public class GroovyASTUtils {
                 if (delegatesTo != null) {
                     return delegatesTo;
                 }
-            } else if (var.isDynamicTyped() || var.getType() == ClassHelper.OBJECT_TYPE) {
+            } else if (var.isDynamicTyped() || var.getType() == ClassHelper.OBJECT_TYPE || var.getType() == null
+                    || var.getOriginType() == ClassHelper.OBJECT_TYPE) {
                 ASTNode defNode = GroovyASTUtils.getDefinition(node, false, astVisitor);
                 if (defNode instanceof Variable) {
                     Variable defVar = (Variable) defNode;
@@ -516,12 +522,24 @@ public class GroovyASTUtils {
                         }
                     }
                 }
+                if (var.getName() != null) {
+                    ClassNode assignedType = findAssignedTypeForVariable(var.getName(), node, astVisitor);
+                    if (assignedType != null) {
+                        return assignedType;
+                    }
+                }
             }
             if (var.getOriginType() != null) {
                 return var.getOriginType();
             }
             if (var.getType() != null && var.getType() != ClassHelper.DYNAMIC_TYPE) {
                 return var.getType();
+            }
+            if (var.getName() != null) {
+                ClassNode assignedType = findAssignedTypeForVariable(var.getName(), node, astVisitor);
+                if (assignedType != null) {
+                    return assignedType;
+                }
             }
         }
         if (node instanceof Expression) {
@@ -621,6 +639,78 @@ public class GroovyASTUtils {
             }
         }
         return commonType != null ? commonType : ClassHelper.OBJECT_TYPE;
+    }
+
+    private static ClassNode findAssignedTypeForVariable(String varName, ASTNode usageNode,
+            ASTNodeVisitor astVisitor) {
+        if (varName == null || astVisitor == null) {
+            return null;
+        }
+        int usageLine = usageNode != null ? usageNode.getLineNumber() : -1;
+        int usageColumn = usageNode != null ? usageNode.getColumnNumber() : -1;
+        ClassNode bestType = null;
+        int bestLine = -1;
+        int bestColumn = -1;
+        for (ASTNode candidate : astVisitor.getNodes()) {
+            if (!(candidate instanceof BinaryExpression)) {
+                if (candidate instanceof DeclarationExpression) {
+                    DeclarationExpression decl = (DeclarationExpression) candidate;
+                    if (decl.getVariableExpression() != null
+                            && varName.equals(decl.getVariableExpression().getName())
+                            && decl.getRightExpression() != null) {
+                        ClassNode type = getTypeOfNode(decl.getRightExpression(), astVisitor);
+                        if (type != null) {
+                            if (bestType == null) {
+                                bestType = type;
+                                bestLine = candidate.getLineNumber();
+                                bestColumn = candidate.getColumnNumber();
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            BinaryExpression binary = (BinaryExpression) candidate;
+            if (!isAssignmentOperator(binary.getOperation() != null ? binary.getOperation().getText() : null)) {
+                continue;
+            }
+            Expression left = binary.getLeftExpression();
+            if (!(left instanceof VariableExpression)) {
+                continue;
+            }
+            String name = ((VariableExpression) left).getName();
+            if (!varName.equals(name)) {
+                continue;
+            }
+            int line = candidate.getLineNumber();
+            int column = candidate.getColumnNumber();
+            if (usageLine != -1 && line != -1) {
+                if (line > usageLine || (line == usageLine && column > usageColumn)) {
+                    continue;
+                }
+            }
+            ClassNode type = getTypeOfNode(binary.getRightExpression(), astVisitor);
+            if (type == null) {
+                continue;
+            }
+            if (bestType == null || line > bestLine || (line == bestLine && column > bestColumn)) {
+                bestType = type;
+                bestLine = line;
+                bestColumn = column;
+            }
+        }
+        return bestType;
+    }
+
+    private static boolean isAssignmentOperator(String opText) {
+        if (opText == null) {
+            return false;
+        }
+        String op = opText.trim();
+        if (op.equals("==") || op.equals("!=")) {
+            return false;
+        }
+        return op.equals("=") || op.endsWith("=");
     }
 
     private static ClassNode inferCommonType(List<Expression> expressions, ASTNodeVisitor astVisitor) {

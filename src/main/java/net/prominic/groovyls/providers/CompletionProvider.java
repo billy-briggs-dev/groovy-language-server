@@ -88,6 +88,7 @@ public class CompletionProvider {
 	private ScanResult classGraphScanResult;
 	private FileContentsTracker files;
 	private URI completionUri;
+	private Position completionPosition;
 	private int maxItemCount = 5000;
 	private boolean isIncomplete = false;
 
@@ -106,6 +107,7 @@ public class CompletionProvider {
 		}
 		URI uri = URI.create(textDocument.getUri());
 		completionUri = uri;
+		completionPosition = position;
 		ASTNode offsetNode = ast.getNodeAtLineAndColumn(uri, position.getLine(), position.getCharacter());
 		ASTNode parentNode = offsetNode != null ? ast.getParent(offsetNode) : null;
 
@@ -149,6 +151,29 @@ public class CompletionProvider {
 			populateItemsFromExpression((MethodCallExpression) offsetNode, prefix, items);
 		}
 
+		boolean hasMemberItems = items.stream().anyMatch(item -> {
+			CompletionItemKind kind = item != null ? item.getKind() : null;
+			return CompletionItemKind.Method.equals(kind)
+					|| CompletionItemKind.Field.equals(kind)
+					|| CompletionItemKind.Property.equals(kind);
+		});
+		if (hasMemberAccessInSource(position) && !hasMemberItems) {
+			String leftName = getLeftExpressionNameFromSource(position);
+			if (leftName != null) {
+				VariableExpression varExpr = findVariableExpressionAtPosition(uri, leftName, position);
+				ClassNode inferredType = resolveTypeForNameAtPosition(uri, leftName, position);
+				String prefix = getMemberNameFromSource(position);
+				if (prefix == null) {
+					prefix = "";
+				}
+				if (inferredType != null) {
+					populateItemsFromType(inferredType, prefix, items);
+				} else if (varExpr != null) {
+					populateItemsFromExpression(varExpr, prefix, items);
+				}
+			}
+		}
+
 		if (items.isEmpty() && hasMemberAccessInSource(position)) {
 			String prefix = getMemberNameFromSource(position);
 			if (prefix == null) {
@@ -174,6 +199,9 @@ public class CompletionProvider {
 			return null;
 		}
 		List<ASTNode> nodes = ast.getNodes(uri);
+		if (nodes == null || nodes.isEmpty()) {
+			nodes = ast.getNodes();
+		}
 		if (nodes == null || nodes.isEmpty()) {
 			return null;
 		}
@@ -478,6 +506,18 @@ public class CompletionProvider {
 						}
 					}
 				}
+			}
+		}
+		if ((leftType == null || leftType == ClassHelper.DYNAMIC_TYPE || leftType == ClassHelper.OBJECT_TYPE)
+				&& leftSide instanceof VariableExpression) {
+			Position inferredPosition = completionPosition;
+			if (inferredPosition == null && leftSide.getLineNumber() > 0 && leftSide.getColumnNumber() > 0) {
+				inferredPosition = new Position(leftSide.getLineNumber() - 1, leftSide.getColumnNumber() - 1);
+			}
+			String name = ((VariableExpression) leftSide).getName();
+			ClassNode inferredType = resolveTypeForNameAtPosition(completionUri, name, inferredPosition);
+			if (inferredType != null) {
+				leftType = inferredType;
 			}
 		}
 		if (leftType != null) {
@@ -819,6 +859,221 @@ public class CompletionProvider {
 		}
 		int lastDot = line.lastIndexOf('.', Math.max(0, column - 1));
 		return lastDot != -1;
+	}
+
+	private String getLeftExpressionNameFromSource(Position position) {
+		if (files == null || completionUri == null) {
+			return null;
+		}
+		String text = files.getContents(completionUri);
+		if (text == null) {
+			return null;
+		}
+		int offset = Positions.getOffset(text, position);
+		int lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1));
+		lineStart = lineStart == -1 ? 0 : lineStart + 1;
+		int lineEnd = text.indexOf('\n', offset);
+		if (lineEnd == -1) {
+			lineEnd = text.length();
+		}
+		String line = text.substring(lineStart, lineEnd);
+		int column = position.getCharacter();
+		if (column > line.length()) {
+			column = line.length();
+		}
+		int lastDot = line.lastIndexOf('.', Math.max(0, column - 1));
+		if (lastDot == -1) {
+			return null;
+		}
+		String left = line.substring(0, lastDot).trim();
+		if (left.endsWith(")")) {
+			return null;
+		}
+		int i = left.length() - 1;
+		while (i >= 0 && Character.isJavaIdentifierPart(left.charAt(i))) {
+			i--;
+		}
+		String name = left.substring(i + 1).trim();
+		return name.isEmpty() ? null : name;
+	}
+
+	private VariableExpression findVariableExpressionAtPosition(URI uri, String name, Position position) {
+		if (uri == null || name == null || ast == null) {
+			return null;
+		}
+		List<ASTNode> nodes = ast.getNodes(uri);
+		if (nodes == null || nodes.isEmpty()) {
+			return null;
+		}
+		VariableExpression best = null;
+		Position bestStart = null;
+		for (ASTNode node : nodes) {
+			if (!(node instanceof VariableExpression)) {
+				continue;
+			}
+			VariableExpression varExpr = (VariableExpression) node;
+			if (!name.equals(varExpr.getName())) {
+				continue;
+			}
+			Range range = GroovyLanguageServerUtils.astNodeToRange(varExpr);
+			if (range == null) {
+				continue;
+			}
+			Position start = range.getStart();
+			if (start.getLine() > position.getLine()
+					|| (start.getLine() == position.getLine() && start.getCharacter() > position.getCharacter())) {
+				continue;
+			}
+			if (bestStart == null || start.getLine() > bestStart.getLine()
+					|| (start.getLine() == bestStart.getLine()
+							&& start.getCharacter() > bestStart.getCharacter())) {
+				bestStart = start;
+				best = varExpr;
+			}
+		}
+		return best;
+	}
+
+	private ClassNode resolveTypeForNameAtPosition(URI uri, String name, Position position) {
+		if (uri == null || name == null || ast == null) {
+			return null;
+		}
+		List<ASTNode> nodes = ast.getNodes(uri);
+		if (nodes == null || nodes.isEmpty()) {
+			return null;
+		}
+		ClassNode bestType = null;
+		Position bestStart = null;
+		for (ASTNode node : nodes) {
+			Range range = null;
+			ClassNode candidateType = null;
+			if (node instanceof DeclarationExpression) {
+				DeclarationExpression decl = (DeclarationExpression) node;
+				if (decl.getVariableExpression() != null
+						&& name.equals(decl.getVariableExpression().getName())) {
+					range = GroovyLanguageServerUtils.astNodeToRange(decl.getVariableExpression());
+					candidateType = GroovyASTUtils.getTypeOfNode(decl.getRightExpression(), ast);
+				}
+			} else if (node instanceof BinaryExpression) {
+				BinaryExpression binary = (BinaryExpression) node;
+				if (binary.getLeftExpression() instanceof VariableExpression) {
+					VariableExpression varExpr = (VariableExpression) binary.getLeftExpression();
+					if (name.equals(varExpr.getName()) && isAssignmentOperator(binary.getOperation() != null
+							? binary.getOperation().getText()
+							: null)) {
+						range = GroovyLanguageServerUtils.astNodeToRange(varExpr);
+						candidateType = GroovyASTUtils.getTypeOfNode(binary.getRightExpression(), ast);
+					}
+				}
+			}
+			if (candidateType == null) {
+				continue;
+			}
+			Position start = range != null ? range.getStart() : null;
+			if (start != null) {
+				if (start.getLine() > position.getLine()
+						|| (start.getLine() == position.getLine()
+								&& start.getCharacter() > position.getCharacter())) {
+					continue;
+				}
+			}
+			if (bestStart == null || start == null || start.getLine() > bestStart.getLine()
+					|| (start.getLine() == bestStart.getLine()
+							&& start.getCharacter() > bestStart.getCharacter())) {
+				bestStart = start;
+				bestType = candidateType;
+			}
+		}
+		if (bestType != null) {
+			return bestType;
+		}
+		return resolveTypeFromSourceText(uri, name, position);
+	}
+
+	private ClassNode resolveTypeFromSourceText(URI uri, String name, Position position) {
+		if (files == null || uri == null || name == null) {
+			return null;
+		}
+		String text = files.getContents(uri);
+		if (text == null) {
+			return null;
+		}
+		String[] lines = text.split("\\r?\\n");
+		int maxLine = Math.min(position.getLine(), lines.length - 1);
+		Pattern pattern = Pattern.compile("\\b" + Pattern.quote(name) + "\\b\\s*=\\s*(.+)");
+		String rhs = null;
+		for (int i = 0; i <= maxLine; i++) {
+			String line = lines[i];
+			Matcher matcher = pattern.matcher(line);
+			if (matcher.find()) {
+				rhs = matcher.group(1).trim();
+			}
+		}
+		if (rhs == null || rhs.isEmpty()) {
+			return null;
+		}
+		if (rhs.startsWith("'") || rhs.startsWith("\"")) {
+			return ClassHelper.STRING_TYPE;
+		}
+		if (rhs.startsWith("[")) {
+			return rhs.contains(":") ? ClassHelper.MAP_TYPE : ClassHelper.LIST_TYPE;
+		}
+		if (rhs.startsWith("true") || rhs.startsWith("false")) {
+			return ClassHelper.Boolean_TYPE;
+		}
+		return null;
+	}
+
+	private void populateItemsFromType(ClassNode leftType, String memberNamePrefix, List<CompletionItem> items) {
+		if (leftType == null) {
+			return;
+		}
+		Set<String> existingNames = new HashSet<>();
+		List<ClassNode> classNodes = new ArrayList<>();
+		classNodes.add(leftType);
+		int i = 0;
+		while (i < classNodes.size()) {
+			ClassNode current = classNodes.get(i);
+			List<PropertyNode> properties = current.getProperties().stream().filter(prop -> !prop.isStatic())
+					.collect(Collectors.toList());
+			List<FieldNode> fields = current.getFields().stream().filter(field -> !field.isStatic())
+					.collect(Collectors.toList());
+			populateItemsFromPropertiesAndFields(properties, fields, memberNamePrefix, existingNames, items);
+			List<MethodNode> methods = current.getMethods().stream().filter(method -> !method.isStatic())
+					.collect(Collectors.toList());
+			populateItemsFromMethods(methods, memberNamePrefix, existingNames, items);
+			populateItemsFromPropertiesAndFields(ast.getMetaClassProperties(current), Collections.emptyList(),
+					memberNamePrefix, existingNames, items);
+			populateItemsFromMethods(ast.getMetaClassMethods(current), memberNamePrefix, existingNames, items);
+			if (current.isInterface()) {
+				for (ClassNode interfaceNode : current.getInterfaces()) {
+					classNodes.add(interfaceNode);
+				}
+			} else {
+				ClassNode superClassNode = null;
+				try {
+					superClassNode = current.getSuperClass();
+				} catch (NoClassDefFoundError e) {
+					// ignore missing classpath
+				}
+				if (superClassNode != null) {
+					classNodes.add(superClassNode);
+				}
+			}
+			i++;
+		}
+		populateItemsFromMetaClassAssignments(leftType, memberNamePrefix, existingNames, items);
+	}
+
+	private boolean isAssignmentOperator(String opText) {
+		if (opText == null) {
+			return false;
+		}
+		String op = opText.trim();
+		if (op.equals("==") || op.equals("!=")) {
+			return false;
+		}
+		return op.equals("=") || op.endsWith("=");
 	}
 
 	private boolean isCallResultMemberAccess(Position position) {
