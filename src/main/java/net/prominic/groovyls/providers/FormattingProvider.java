@@ -142,7 +142,9 @@ public class FormattingProvider {
 		for (int i = 0; i < line.length(); i++) {
 			char character = line.charAt(i);
 			if (character == '\\') {
-				i++;
+				if (i + 1 < line.length()) {
+					i++;
+				}
 				continue;
 			}
 			if (character == '\'' && !inDoubleQuote) {
@@ -247,6 +249,7 @@ public class FormattingProvider {
 					index += 2;
 					continue;
 				}
+				return index + 1;
 			}
 			if (character == quote) {
 				return index + 1;
@@ -299,7 +302,9 @@ public class FormattingProvider {
 		for (int i = 0; i < line.length(); i++) {
 			char character = line.charAt(i);
 			if (character == '\\') {
-				i++;
+				if (i + 1 < line.length()) {
+					i++;
+				}
 				continue;
 			}
 			if (character == '\'' && !inDoubleQuote) {
