@@ -761,7 +761,6 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			if (contents == null || importNodes.isEmpty()) {
 				continue;
 			}
-			String[] lines = contents.split("\\R", -1);
 			Set<Integer> importLines = new HashSet<>();
 			for (ImportNode importNode : importNodes) {
 				Range range = GroovyLanguageServerUtils.astNodeToRange(importNode);
@@ -770,16 +769,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				}
 				importLines.add(range.getStart().getLine());
 			}
-			StringBuilder builder = new StringBuilder(contents.length());
-			for (int i = 0; i < lines.length; i++) {
-				if (!importLines.contains(i)) {
-					builder.append(lines[i]);
-				}
-				if (i < lines.length - 1) {
-					builder.append("\n");
-				}
-			}
-			String searchContent = builder.toString();
+			String searchContent = removeImportLines(contents, importLines);
+			Map<String, Pattern> patternCache = new HashMap<>();
 			for (ImportNode importNode : importNodes) {
 				String importName = importNode.getAlias();
 				ClassNode importType = importNode.getType();
@@ -796,7 +787,7 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 				if (range == null) {
 					continue;
 				}
-				if (isImportNameUsed(searchContent, importName, importType)) {
+				if (isImportNameUsed(searchContent, importName, importType, patternCache)) {
 					continue;
 				}
 				Diagnostic diagnostic = new Diagnostic();
@@ -808,11 +799,30 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		}
 	}
 
-	private boolean isImportNameUsed(String contents, String importName, ClassNode importType) {
+	private String removeImportLines(String contents, Set<Integer> importLines) {
+		if (contents == null || importLines == null || importLines.isEmpty()) {
+			return contents;
+		}
+		String[] lines = contents.split("\\R", -1);
+		StringBuilder builder = new StringBuilder(contents.length());
+		for (int i = 0; i < lines.length; i++) {
+			if (!importLines.contains(i)) {
+				builder.append(lines[i]);
+			}
+			if (i < lines.length - 1) {
+				builder.append("\n");
+			}
+		}
+		return builder.toString();
+	}
+
+	private boolean isImportNameUsed(String contents, String importName, ClassNode importType,
+			Map<String, Pattern> patternCache) {
 		if (contents == null || importName == null || importName.isBlank()) {
 			return false;
 		}
-		Pattern pattern = Pattern.compile("(?<!\\w)" + Pattern.quote(importName) + "(?!\\w)");
+		Pattern pattern = patternCache.computeIfAbsent(importName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
 		if (pattern.matcher(contents).find()) {
 			return true;
 		}
@@ -823,7 +833,8 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		if (fullName == null || fullName.isBlank() || fullName.equals(importName)) {
 			return false;
 		}
-		Pattern qualifiedPattern = Pattern.compile("(?<!\\w)" + Pattern.quote(fullName) + "(?!\\w)");
+		Pattern qualifiedPattern = patternCache.computeIfAbsent(fullName,
+				name -> Pattern.compile("(?<!\\w)" + Pattern.quote(name) + "(?!\\w)"));
 		return qualifiedPattern.matcher(contents).find();
 	}
 
