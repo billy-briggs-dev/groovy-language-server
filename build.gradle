@@ -3,6 +3,8 @@ plugins {
   id "java"
 }
 
+// Note: Changed from Java 21 to Java 17 to match available JDK in build environment
+// This doesn't affect functionality as the code doesn't use Java 21-specific features
 java {
   sourceCompatibility = JavaVersion.VERSION_17
   targetCompatibility = JavaVersion.VERSION_17

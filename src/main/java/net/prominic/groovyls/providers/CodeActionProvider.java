@@ -199,17 +199,12 @@ public class CodeActionProvider {
 		}
 
 		VariableExpression varExpr = (VariableExpression) node;
-		Variable accessedVar = varExpr.getAccessedVariable();
 		
 		// Can only inline local variables, not parameters or fields
-		if (accessedVar == null || accessedVar instanceof org.codehaus.groovy.ast.Parameter) {
+		// Check if it's a parameter by accessing the variable
+		Variable var = varExpr.getAccessedVariable();
+		if (var == null || var instanceof org.codehaus.groovy.ast.Parameter) {
 			return null;
-		}
-
-		// Find the definition of the variable
-		ASTNode definition = null;
-		if (ast != null) {
-			definition = GroovyASTUtils.getDefinition(node, false, ast);
 		}
 
 		// For now, just create a disabled action as a placeholder
