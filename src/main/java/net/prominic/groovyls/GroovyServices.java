@@ -128,9 +128,13 @@ import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
 import org.eclipse.lsp4j.FoldingRange;
 import org.eclipse.lsp4j.FoldingRangeRequestParams;
+import org.eclipse.lsp4j.PrepareRenameDefaultBehavior;
+import org.eclipse.lsp4j.PrepareRenameParams;
+import org.eclipse.lsp4j.PrepareRenameResult;
 import org.eclipse.lsp4j.SelectionRange;
 import org.eclipse.lsp4j.SelectionRangeParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
+import org.eclipse.lsp4j.jsonrpc.messages.Either3;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
 import org.eclipse.lsp4j.services.TextDocumentService;
@@ -718,6 +722,23 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 			results.addAll(gspProvider.provideWorkspaceSymbols(params.getQuery()));
 		}
 		return CompletableFuture.completedFuture(Either.forRight(results));
+	}
+
+	@Override
+	public CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> prepareRename(PrepareRenameParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		RenameProvider provider = new RenameProvider(astVisitor, fileContentsTracker);
+		CompletableFuture<Either<Range, Range>> result = provider.providePrepareRename(params.getTextDocument(), params.getPosition());
+		
+		return result.thenApply(either -> {
+			if (either == null) {
+				return null;
+			}
+			// Convert Either<Range, Range> to Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>
+			return Either3.forFirst(either.getLeft());
+		});
 	}
 
 	@Override

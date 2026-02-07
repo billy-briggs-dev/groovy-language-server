@@ -10,6 +10,7 @@ The following language server protocol requests are currently supported:
 - foldingRange
 - formatting (document/range)
 - hover
+- prepareRename
 - references
 - rename
 - selectionRange
