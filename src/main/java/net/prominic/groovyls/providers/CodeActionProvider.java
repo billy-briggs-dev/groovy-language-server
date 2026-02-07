@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import org.codehaus.groovy.ast.ASTNode;
+import org.codehaus.groovy.ast.Variable;
 import org.codehaus.groovy.ast.expr.ConstantExpression;
 import org.codehaus.groovy.ast.expr.VariableExpression;
 import org.codehaus.groovy.ast.stmt.BlockStatement;
@@ -42,6 +43,7 @@ import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 
 import net.prominic.groovyls.compiler.ast.ASTNodeVisitor;
+import net.prominic.groovyls.compiler.util.GroovyASTUtils;
 import net.prominic.groovyls.util.FileContentsTracker;
 import net.prominic.groovyls.util.GroovyLanguageServerUtils;
 import net.prominic.lsp.utils.Positions;
@@ -106,20 +108,88 @@ public class CodeActionProvider {
 
 		org.codehaus.groovy.ast.expr.Expression expr = (org.codehaus.groovy.ast.expr.Expression) node;
 
-		// Don't extract simple literals
+		// Don't extract simple literals (except strings which might be complex)
 		if (expr instanceof ConstantExpression) {
+			ConstantExpression constExpr = (ConstantExpression) expr;
+			if (!(constExpr.getValue() instanceof String)) {
+				return null;
+			}
+		}
+
+		String contents = fileContentsTracker.getContents(uri);
+		if (contents == null) {
+			return null;
+		}
+
+		Range nodeRange = GroovyLanguageServerUtils.astNodeToRange(node);
+		if (nodeRange == null) {
+			return null;
+		}
+
+		String exprText = Ranges.getSubstring(contents, nodeRange);
+		if (exprText == null || exprText.trim().isEmpty()) {
 			return null;
 		}
 
 		CodeAction codeAction = new CodeAction("Extract to variable");
 		codeAction.setKind(CodeActionKind.RefactorExtract);
 
-		// For now, mark as disabled with a message
-		// Full implementation would require more complex AST manipulation
-		codeAction.setDisabled(
-				new org.eclipse.lsp4j.CodeActionDisabled("Extract variable not yet fully implemented"));
+		// Generate variable name based on expression
+		String varName = generateVariableName(expr, exprText);
+
+		// Create the edit to extract the variable
+		// Insert the variable declaration on the line before
+		Position insertPos = new Position(nodeRange.getStart().getLine(), 0);
+		String indent = getIndentation(contents, nodeRange.getStart().getLine());
+		String newText = indent + "def " + varName + " = " + exprText + "\n";
+
+		// Replace the expression with the variable name
+		TextEdit insertEdit = new TextEdit(new Range(insertPos, insertPos), newText);
+		TextEdit replaceEdit = new TextEdit(nodeRange, varName);
+
+		java.util.List<TextEdit> edits = new java.util.ArrayList<>();
+		edits.add(insertEdit);
+		edits.add(replaceEdit);
+
+		WorkspaceEdit workspaceEdit = new WorkspaceEdit(
+				Collections.singletonMap(uri.toString(), edits));
+		codeAction.setEdit(workspaceEdit);
 
 		return codeAction;
+	}
+
+	private String generateVariableName(org.codehaus.groovy.ast.expr.Expression expr, String exprText) {
+		// Try to generate a meaningful variable name
+		if (expr instanceof org.codehaus.groovy.ast.expr.MethodCallExpression) {
+			org.codehaus.groovy.ast.expr.MethodCallExpression methodCall = (org.codehaus.groovy.ast.expr.MethodCallExpression) expr;
+			String methodName = methodCall.getMethodAsString();
+			if (methodName != null && !methodName.isEmpty()) {
+				return methodName + "Result";
+			}
+		}
+
+		if (expr instanceof ConstantExpression) {
+			ConstantExpression constExpr = (ConstantExpression) expr;
+			if (constExpr.getValue() instanceof String) {
+				return "text";
+			}
+		}
+
+		// Default name
+		return "value";
+	}
+
+	private String getIndentation(String contents, int lineNumber) {
+		String[] lines = contents.split("\n");
+		if (lineNumber >= 0 && lineNumber < lines.length) {
+			String line = lines[lineNumber];
+			int i = 0;
+			while (i < line.length() && Character.isWhitespace(line.charAt(i))) {
+				i++;
+			}
+			return line.substring(0, i);
+		}
+		return "";
 	}
 
 	private CodeAction createInlineVariableAction(URI uri, ASTNode node) {
@@ -128,11 +198,31 @@ public class CodeActionProvider {
 			return null;
 		}
 
+		VariableExpression varExpr = (VariableExpression) node;
+		Variable accessedVar = varExpr.getAccessedVariable();
+		
+		// Can only inline local variables, not parameters or fields
+		if (accessedVar == null || accessedVar instanceof org.codehaus.groovy.ast.Parameter) {
+			return null;
+		}
+
+		// Find the definition of the variable
+		ASTNode definition = null;
+		if (ast != null) {
+			definition = GroovyASTUtils.getDefinition(node, false, ast);
+		}
+
+		// For now, just create a disabled action as a placeholder
+		// Full implementation would need to:
+		// 1. Find the variable declaration and its initializer
+		// 2. Find all references to the variable
+		// 3. Replace each reference with the initializer expression
+		// 4. Remove the variable declaration
 		CodeAction codeAction = new CodeAction("Inline variable");
 		codeAction.setKind(CodeActionKind.RefactorInline);
 
-		// For now, mark as disabled with a message
-		codeAction.setDisabled(new org.eclipse.lsp4j.CodeActionDisabled("Inline variable not yet fully implemented"));
+		codeAction.setDisabled(new org.eclipse.lsp4j.CodeActionDisabled(
+				"Inline variable requires more complex implementation - use refactoring manually"));
 
 		return codeAction;
 	}

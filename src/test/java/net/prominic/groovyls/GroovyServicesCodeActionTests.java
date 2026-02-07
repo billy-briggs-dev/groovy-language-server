@@ -210,4 +210,40 @@ class GroovyServicesCodeActionTests {
 
 		Assertions.assertEquals(0, convertStringActions, "Should not have string conversion actions for numbers");
 	}
+
+	@Test
+	void testExtractVariableAction() throws Exception {
+		Path filePath = srcRoot.resolve("CodeActions4.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class CodeActions4 {\n");
+		contents.append("  def myMethod() {\n");
+		contents.append("    println(\"hello\".toUpperCase())\n");
+		contents.append("  }\n");
+		contents.append("}\n");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		// Position at the method call expression
+		Position position = new Position(2, 13);
+		Range range = new Range(position, position);
+
+		CodeActionParams params = new CodeActionParams(textDocument, range, new CodeActionContext());
+
+		CompletableFuture<List<Either<Command, CodeAction>>> future = services.codeAction(params);
+		List<Either<Command, CodeAction>> codeActions = future.get();
+
+		Assertions.assertNotNull(codeActions);
+		// Should have extract variable action
+		CodeAction extractAction = codeActions.stream()
+				.filter(Either::isRight)
+				.map(Either::getRight)
+				.filter(action -> action.getTitle().contains("Extract"))
+				.findFirst()
+				.orElse(null);
+
+		Assertions.assertNotNull(extractAction, "Expected to find 'Extract to variable' action");
+		Assertions.assertNotNull(extractAction.getEdit(), "Expected the action to have an edit");
+	}
 }
