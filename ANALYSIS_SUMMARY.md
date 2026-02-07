@@ -15,10 +15,11 @@ This analysis identifies **missing features** in the Groovy Language Server comp
 ### Key Findings
 
 **Current Implementation Status:**
-- ✅ **46% LSP Feature Coverage** (28 out of 61 LSP features)
+- ✅ **47% LSP Feature Coverage** (29 out of 62 LSP features)
 - ✅ Strong navigation and basic code intelligence
 - ✅ Good build tool integration (Gradle, Maven, Grails)
 - ✅ **Code folding support (NEW!)**
+- ✅ **Smart selection ranges (NEW!)**
 - ⚠️ Limited refactoring (rename only)
 - ⚠️ Basic diagnostics (syntax errors + some semantic)
 - ❌ No code actions or code lens

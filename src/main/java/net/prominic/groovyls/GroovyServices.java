@@ -128,6 +128,8 @@ import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
 import org.eclipse.lsp4j.FoldingRange;
 import org.eclipse.lsp4j.FoldingRangeRequestParams;
+import org.eclipse.lsp4j.SelectionRange;
+import org.eclipse.lsp4j.SelectionRangeParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
@@ -146,6 +148,7 @@ import net.prominic.groovyls.providers.CallHierarchyProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
 import net.prominic.groovyls.providers.FoldingRangeProvider;
+import net.prominic.groovyls.providers.SelectionRangeProvider;
 import net.prominic.groovyls.providers.GspTemplateSymbolProvider;
 import net.prominic.groovyls.providers.ImplementationProvider;
 import net.prominic.groovyls.providers.FormattingProvider;
@@ -733,6 +736,15 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		FoldingRangeProvider provider = new FoldingRangeProvider(astVisitor);
 		return provider.provideFoldingRanges(params.getTextDocument());
+	}
+
+	@Override
+	public CompletableFuture<List<SelectionRange>> selectionRange(SelectionRangeParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		SelectionRangeProvider provider = new SelectionRangeProvider(astVisitor);
+		return provider.provideSelectionRanges(params.getTextDocument(), params.getPositions());
 	}
 
 	@Override

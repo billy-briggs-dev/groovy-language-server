@@ -29,6 +29,7 @@ Quick reference for LSP feature completeness in Groovy Language Server.
 - ❌ `textDocument/declaration` - Go to declaration
 - ❌ `textDocument/prepareRename` - Validate rename
 - ✅ `textDocument/rename` - Rename symbol
+- ✅ `textDocument/selectionRange` - Smart selection (NEW!)
 
 ### Code Intelligence
 - ✅ `textDocument/completion` - Code completion
@@ -170,7 +171,7 @@ diagnosticProvider: false (MISSING - only push model)
 | Category | Implemented | Total | Coverage |
 |----------|-------------|-------|----------|
 | **Text Synchronization** | 5/5 | 5 | 100% |
-| **Navigation** | 7/9 | 9 | 78% |
+| **Navigation** | 8/10 | 10 | 80% |
 | **Code Intelligence** | 3/5 | 5 | 60% |
 | **Diagnostics** | 1/3 | 3 | 33% |
 | **Code Editing** | 2/6 | 6 | 33% |
@@ -178,7 +179,7 @@ diagnosticProvider: false (MISSING - only push model)
 | **Hierarchy** | 6/6 | 6 | 100% |
 | **Workspace** | 3/13 | 13 | 23% |
 | **Advanced** | 0/4 | 4 | 0% |
-| **TOTAL** | 28/61 | 61 | 46% |
+| **TOTAL** | 29/62 | 62 | 47% |
 
 ---
 

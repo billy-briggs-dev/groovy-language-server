@@ -191,17 +191,17 @@ These are **standard LSP features** that should be implemented for feature compl
 
 ### ❌ Selection Range (Smart Selection)
 
-**Status:** Not Implemented  
-**Impact:** Low - Users cannot expand selection semantically  
+**Status:** ✅ Now Implemented  
+**Impact:** Low-Medium - Users can expand selection semantically  
 **LSP Methods:**
-- `textDocument/selectionRange` - Not implemented
+- `textDocument/selectionRange` - ✅ Implemented
 
-**What's Missing:**
+**What it provides:**
 - Expand selection to expression, statement, block, method, class
 - Semantic-aware selection expansion
+- Nested selection ranges from innermost to outermost AST nodes
 
-**Difficulty:** Low  
-**Recommendation:** Walk AST to find enclosing nodes.
+**Implementation:** Walks AST to find all enclosing nodes at a position and returns nested selection ranges.
 
 ---
 

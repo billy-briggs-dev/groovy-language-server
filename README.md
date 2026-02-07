@@ -12,6 +12,7 @@ The following language server protocol requests are currently supported:
 - hover
 - references
 - rename
+- selectionRange
 - signatureHelp
 - symbol
 - typeDefinition
