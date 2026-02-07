@@ -62,3 +62,11 @@ A sample language extension for Visual Studio Code is available in the _vscode-e
 Instructions for setting up the language server in Sublime Text is available in the _sublime-text_ directory.
 
 Moonshine IDE natively provides a Grails project type that automatically configures the language server.
+
+## Feature Documentation
+
+For comprehensive documentation on features and roadmap:
+
+- **[FEATURES.md](FEATURES.md)** - Detailed feature parity roadmap with IntelliJ IDEA, implementation status, and planned features
+- **[MISSING_FEATURES_ANALYSIS.md](MISSING_FEATURES_ANALYSIS.md)** - Complete analysis of missing LSP features with prioritization and recommendations
+- **[LSP_FEATURE_CHECKLIST.md](LSP_FEATURE_CHECKLIST.md)** - Quick reference checklist for LSP feature implementation status
