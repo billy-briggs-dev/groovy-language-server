@@ -22,7 +22,9 @@ package net.prominic.groovyls.providers;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 import org.codehaus.groovy.ast.ASTNode;
@@ -159,15 +161,19 @@ public class ImplementationProvider {
 			}
 		}
 		
-		// Find the method in each implementing class
+		// Find the method in each implementing class, using Set to avoid duplicates
+		Set<String> seenLocations = new HashSet<>();
 		for (ClassNode implementingClass : implementingClasses) {
 			MethodNode implementingMethod = findMatchingMethod(implementingClass, interfaceMethod);
 			if (implementingMethod != null && implementingMethod != interfaceMethod) {
 				URI uri = ast.getURI(implementingMethod);
 				if (uri != null) {
 					Location location = GroovyLanguageServerUtils.astNodeToLocation(implementingMethod, uri);
-					if (location != null && !implementations.contains(location)) {
-						implementations.add(location);
+					if (location != null) {
+						String locationKey = location.getUri() + ":" + location.getRange().toString();
+						if (seenLocations.add(locationKey)) {
+							implementations.add(location);
+						}
 					}
 				}
 			}
@@ -184,9 +190,25 @@ public class ImplementationProvider {
 			if (method.getName().equals(methodName)) {
 				int methodParamCount = method.getParameters() != null ? method.getParameters().length : 0;
 				if (methodParamCount == paramCount) {
-					// Simple match by name and parameter count
-					// A more sophisticated check would compare parameter types
-					return method;
+					// Check parameter types for better matching
+					if (paramCount == 0) {
+						return method; // No parameters, so it's a match
+					}
+					
+					// Compare parameter types
+					boolean typesMatch = true;
+					for (int i = 0; i < paramCount; i++) {
+						String matchType = methodToMatch.getParameters()[i].getType().getName();
+						String candidateType = method.getParameters()[i].getType().getName();
+						if (!matchType.equals(candidateType)) {
+							typesMatch = false;
+							break;
+						}
+					}
+					
+					if (typesMatch) {
+						return method;
+					}
 				}
 			}
 		}

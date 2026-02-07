@@ -22,7 +22,9 @@ package net.prominic.groovyls.providers;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import org.codehaus.groovy.ast.ASTNode;
@@ -136,6 +138,9 @@ public class TypeHierarchyProvider {
 
 		List<TypeHierarchyItem> subtypes = new ArrayList<>();
 		
+		// Use a Map to track unique items by name+URI combination for O(n) performance
+		Map<String, TypeHierarchyItem> uniqueSubtypes = new HashMap<>();
+		
 		// Search through all classes in the compilation units to find subtypes
 		for (ASTNode node : ast.getNodes()) {
 			if (node instanceof ClassNode) {
@@ -147,23 +152,15 @@ public class TypeHierarchyProvider {
 				if (isSubtype(candidate, classNode)) {
 					TypeHierarchyItem subItem = createTypeHierarchyItem(candidate);
 					if (subItem != null) {
-						// Check for duplicates based on name and URI
-						boolean isDuplicate = false;
-						for (TypeHierarchyItem existing : subtypes) {
-							if (existing.getName().equals(subItem.getName()) && 
-									existing.getUri().equals(subItem.getUri())) {
-								isDuplicate = true;
-								break;
-							}
-						}
-						if (!isDuplicate) {
-							subtypes.add(subItem);
-						}
+						// Use name+URI as key to avoid duplicates
+						String key = subItem.getName() + "|" + subItem.getUri();
+						uniqueSubtypes.putIfAbsent(key, subItem);
 					}
 				}
 			}
 		}
 		
+		subtypes.addAll(uniqueSubtypes.values());
 		return CompletableFuture.completedFuture(subtypes);
 	}
 
