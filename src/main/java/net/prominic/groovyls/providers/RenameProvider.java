@@ -234,4 +234,50 @@ public class RenameProvider {
 		textEdit.setNewText(newName);
 		return textEdit;
 	}
+
+	public CompletableFuture<Either<Range, Range>> providePrepareRename(TextDocumentIdentifier textDocument,
+			Position position) {
+		if (ast == null) {
+			// Cannot rename - return null
+			return CompletableFuture.completedFuture(null);
+		}
+
+		URI documentURI = URI.create(textDocument.getUri());
+		ASTNode offsetNode = ast.getNodeAtLineAndColumn(documentURI, position.getLine(), position.getCharacter());
+		
+		if (offsetNode == null) {
+			// No node at this position - cannot rename
+			return CompletableFuture.completedFuture(null);
+		}
+
+		// Check if the node is renameable (classes, methods, properties, variables)
+		boolean canRename = offsetNode instanceof ClassNode || 
+							offsetNode instanceof MethodNode ||
+							offsetNode instanceof PropertyNode ||
+							offsetNode instanceof ConstantExpression ||
+							offsetNode instanceof VariableExpression;
+
+		if (!canRename) {
+			// Node type is not renameable
+			return CompletableFuture.completedFuture(null);
+		}
+
+		// Get the range of the symbol name
+		Range range = GroovyLanguageServerUtils.astNodeToRange(offsetNode);
+		if (range == null) {
+			return CompletableFuture.completedFuture(null);
+		}
+
+		// For AST nodes, we need to adjust the range to just the name part
+		String contents = getPartialNodeText(documentURI, offsetNode);
+		if (contents != null) {
+			Position start = range.getStart();
+			Position end = range.getEnd();
+			end.setLine(start.getLine());
+			end.setCharacter(start.getCharacter() + contents.length());
+		}
+
+		// Return the range where rename is valid
+		return CompletableFuture.completedFuture(Either.forLeft(range));
+	}
 }
