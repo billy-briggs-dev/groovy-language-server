@@ -15,13 +15,13 @@ This analysis identifies **missing features** in the Groovy Language Server comp
 ### Key Findings
 
 **Current Implementation Status:**
-- ✅ **49% LSP Feature Coverage** (31 out of 63 LSP features)
+- ✅ **51% LSP Feature Coverage** (32 out of 63 LSP features)
 - ✅ Strong navigation and basic code intelligence
 - ✅ Good build tool integration (Gradle, Maven, Grails)
-- ✅ **Code folding support (NEW!)**
-- ✅ **Smart selection ranges (NEW!)**
-- ✅ **Prepare rename validation (NEW!)**
-- ✅ **Code lens with reference counts (NEW!)**
+- ✅ Code folding support
+- ✅ Smart selection ranges
+- ✅ Prepare rename validation
+- ✅ Code lens with reference counts
 - ⚠️ Limited refactoring (rename only)
 - ⚠️ Basic diagnostics (syntax errors + some semantic)
 - ❌ No code actions
@@ -122,27 +122,11 @@ Based on impact and feasibility analysis:
 
 ---
 
-### 2. 🔴 Code Lens (`textDocument/codeLens`)
-**Status:** Not Implemented  
-**Impact:** High - Missing visual indicators  
-**Difficulty:** Low-Medium  
-**Priority:** #2 - Quick win with high value
-
-**What it enables:**
-- Show reference counts above symbols ("5 references")
-- Show implementation counts ("3 implementations")
-- "Run Test" buttons for test methods
-- Override/implement indicators
-
-**Recommendation:** Start with reference counts (UsageProvider already tracks this data).
-
----
-
-### 3. 🔴 Enhanced Diagnostics
+### 2. 🟢 Enhanced Diagnostics
 **Status:** Partially Implemented (syntax errors only)  
 **Impact:** Very High - Catches errors before runtime  
 **Difficulty:** Medium-High  
-**Priority:** #3 - Essential for correctness
+**Priority:** #2 - Essential for correctness
 
 **What's missing:**
 - Unused declarations (imports, variables, methods, classes)
@@ -155,11 +139,11 @@ Based on impact and feasibility analysis:
 
 ---
 
-### 4. 🟡 Semantic Tokens (`textDocument/semanticTokens`)
+### 3. 🟡 Semantic Tokens (`textDocument/semanticTokens`)
 **Status:** Not Implemented  
 **Impact:** High - Better syntax highlighting  
 **Difficulty:** Medium  
-**Priority:** #4 - Improves readability
+**Priority:** #3 - Improves readability
 
 **What it enables:**
 - Distinguish local vars vs fields vs parameters
@@ -172,19 +156,11 @@ Based on impact and feasibility analysis:
 
 ---
 
-### 5. 🟡 Folding Ranges (`textDocument/foldingRange`)
+### 4. 🟡 Inlay Hints (`textDocument/inlayHint`)
 **Status:** Not Implemented  
-**Impact:** Medium - Code organization  
-**Difficulty:** Low-Medium  
-**Priority:** #5 - Easy to implement
-
-**What it enables:**
-- Collapse methods, classes, closures
-- Fold imports section
-- Fold comments
-- Custom folding regions
-
-**Recommendation:** Walk AST and return ranges for methods/classes/closures first.
+**Impact:** Medium - Missing inline parameter names and type hints  
+**Difficulty:** Medium  
+**Priority:** #4 - Improves code readability
 
 ---
 
@@ -196,10 +172,9 @@ Based on impact and feasibility analysis:
 - [ ] Implement Code Actions framework
 - [ ] Add "Add missing import" action
 - [ ] Add "Remove unused import" action
-- [ ] Implement Code Lens for reference counts
-- [ ] Add folding ranges support
+- [ ] Implement inlay hints for parameter names
 
-**Deliverable:** Users can perform basic quick fixes and see reference counts.
+**Deliverable:** Users can perform basic quick fixes and see parameter hints.
 
 ---
 
@@ -220,10 +195,9 @@ Based on impact and feasibility analysis:
 **Goal:** IDE-like features
 
 - [ ] Implement semantic tokens
-- [ ] Add inlay hints (parameter names)
-- [ ] Smart type-aware completion
-- [ ] Prepare rename validation
-- [ ] Selection range support
+- [ ] Advanced type-aware completion
+- [ ] Enhanced code lens features
+- [ ] More code actions (extract method, inline variable)
 
 **Deliverable:** Editor experience comparable to commercial IDEs.
 
@@ -248,18 +222,14 @@ These features provide high value with relatively low implementation complexity:
 
 ### Easy (1-3 days)
 1. **Document Links** - Parse and make URLs clickable
-2. **Selection Range** - Return AST node ranges
-3. **Prepare Rename** - Validate rename before execution
 
 ### Medium (1-2 weeks)
-4. **Folding Ranges** - Walk AST and return foldable ranges
-5. **Code Lens** - Show reference counts (data already exists)
-6. **Basic Code Actions** - Add/remove imports
+2. **Basic Code Actions** - Add/remove imports
+3. **Inlay Hints** - Parameter name detection
 
 ### Hard (2-4 weeks)
-7. **Semantic Tokens** - Token type classification
-8. **Inlay Hints** - Parameter name detection
-9. **Enhanced Diagnostics** - Unused declaration analysis
+4. **Semantic Tokens** - Token type classification
+5. **Enhanced Diagnostics** - Unused declaration analysis
 
 ---
 
@@ -271,18 +241,18 @@ These features provide high value with relatively low implementation complexity:
 |----------|----------|-------------|-------|
 | Text Synchronization | 100% | 5/5 | ✅ Complete |
 | Hierarchy (Call/Type) | 100% | 6/6 | ✅ Complete |
-| Navigation | 78% | 7/9 | ⚠️ Good |
+| Navigation | 90% | 9/10 | ✅ Excellent |
 | Code Intelligence | 60% | 3/5 | ⚠️ Fair |
 | Code Editing | 33% | 2/6 | ❌ Poor |
 | Diagnostics | 33% | 1/3 | ❌ Poor |
+| Visual Features | 27% | 3/11 | ❌ Poor |
 | Workspace | 23% | 3/13 | ❌ Poor |
-| Visual Features | 0% | 0/10 | ❌ None |
 | Advanced | 0% | 0/4 | ❌ None |
 
 ### Overall
-- **Total LSP Features:** 61
-- **Implemented:** 27
-- **Coverage:** 44%
+- **Total LSP Features:** 63
+- **Implemented:** 32
+- **Coverage:** 51%
 
 ---
 
@@ -290,20 +260,18 @@ These features provide high value with relatively low implementation complexity:
 
 ### Groovy LS vs IntelliJ IDEA
 
-| Feature | IntelliJ | Groovy LS | Gap |
-|---------|----------|-----------|-----|
-| **Go to Definition** | ✅ | ✅ | None |
-| **Find References** | ✅ | ✅ | None |
-| **Type Hierarchy** | ✅ | ✅ | None |
-| **Call Hierarchy** | ✅ | ✅ | None |
-| **Code Completion** | ✅✅✅ | ⚠️ | Large |
-| **Quick Fixes** | ✅✅✅ | ❌ | Critical |
-| **Refactoring** | ✅✅✅ | ⚠️ | Large |
-| **Testing** | ✅✅✅ | ❌ | Critical |
-| **Debugging** | ✅✅✅ | ⚠️ | Medium |
-| **Diagnostics** | ✅✅✅ | ⚠️ | Large |
-| **Syntax Highlighting** | ✅✅ | ❌ | Medium |
-| **Code Folding** | ✅✅ | ❌ | Medium |
+| Feature Category | IntelliJ IDEA | Groovy LS | Gap |
+|-----------------|---------------|-----------|-----|
+| **Navigation** | ✅✅✅ (Excellent) | ✅✅ (Very Good) | Small gap |
+| **Code Completion** | ✅✅✅ (Excellent) | ⚠️ (Basic) | Large gap |
+| **Refactoring** | ✅✅✅ (Full suite) | ⚠️ (Rename only) | Large gap |
+| **Semantic Analysis** | ✅✅✅ (Advanced) | ⚠️ (Basic) | Large gap |
+| **Build Tools** | ✅✅✅ (Full integration) | ⚠️ (Good) | Medium gap |
+| **Formatting** | ✅✅ (Extensive) | ⚠️ (Basic) | Medium gap |
+| **Testing** | ✅✅✅ (Full integration) | ❌ (None) | Large gap |
+| **Debugging** | ✅✅✅ (Full DAP) | ⚠️ (Basic) | Large gap |
+| **Dynamic Features** | ✅✅✅ (Excellent) | ⚠️ (Good) | Medium gap |
+| **Performance** | ✅✅✅ (Optimized) | ⚠️ (Adequate) | Medium gap |
 
 **Legend:**
 - ✅✅✅ Excellent / ✅✅ Very Good / ✅ Good
@@ -364,15 +332,15 @@ These features provide high value with relatively low implementation complexity:
 
 ## Conclusion
 
-The Groovy Language Server is a **solid foundation** with 44% LSP coverage and strong navigation features. The top priorities for reaching feature parity with commercial IDEs are:
+The Groovy Language Server is a **solid foundation** with 51% LSP coverage and excellent navigation features. The top priorities for reaching feature parity with commercial IDEs are:
 
 1. **Code Actions** - Enable quick fixes and refactoring
-2. **Code Lens** - Visual reference indicators
-3. **Enhanced Diagnostics** - Catch more errors
-4. **Semantic Tokens** - Better syntax highlighting
-5. **Folding Ranges** - Code organization
+2. **Enhanced Diagnostics** - Catch more errors
+3. **Semantic Tokens** - Better syntax highlighting
+4. **Inlay Hints** - Show parameter names inline
+5. **Testing Integration** - Support for Spock/JUnit
 
-Implementing these 5 features over the next 6-12 months will dramatically improve the developer experience and make Groovy Language Server competitive with IntelliJ IDEA for most use cases.
+Implementing these features over the next 6-12 months will dramatically improve the developer experience and make Groovy Language Server competitive with IntelliJ IDEA for most use cases.
 
 ---
 
