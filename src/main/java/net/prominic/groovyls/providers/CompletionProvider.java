@@ -56,6 +56,7 @@ import org.eclipse.lsp4j.CompletionContext;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
+import org.eclipse.lsp4j.InsertTextFormat;
 import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
 import org.eclipse.lsp4j.Position;
@@ -83,6 +84,30 @@ public class CompletionProvider {
 			"in", "instanceof", "interface", "native", "new", "null", "package", "private", "protected",
 			"public", "return", "static", "strictfp", "super", "switch", "synchronized", "this", "throw",
 			"throws", "trait", "transient", "true", "try", "volatile", "while");
+
+	// Live template definitions
+	private static class LiveTemplate {
+		String trigger;
+		String label;
+		String description;
+		String snippet;
+
+		LiveTemplate(String trigger, String label, String description, String snippet) {
+			this.trigger = trigger;
+			this.label = label;
+			this.description = description;
+			this.snippet = snippet;
+		}
+	}
+
+	private static final List<LiveTemplate> LIVE_TEMPLATES = Arrays.asList(
+			new LiveTemplate("main", "main", "Main method",
+					"static void main(String[] args) {\n\t${0}\n}"),
+			new LiveTemplate("psvm", "psvm", "public static void main",
+					"public static void main(String[] args) {\n\t${0}\n}"),
+			new LiveTemplate("for", "for", "For loop",
+					"for (${1:item} in ${2:collection}) {\n\t${0}\n}")
+	);
 
 	private ASTNodeVisitor ast;
 	private ScanResult classGraphScanResult;
@@ -689,6 +714,7 @@ public class CompletionProvider {
 			current = ast.getParent(current);
 		}
 		populateKeywordItems(namePrefix, existingNames, items);
+		populateLiveTemplateItems(namePrefix, existingNames, items);
 		if (namePrefix != null && !namePrefix.isEmpty()) {
 			populateTypes(node, namePrefix, existingNames, items);
 		}
@@ -705,6 +731,26 @@ public class CompletionProvider {
 			item.setKind(CompletionItemKind.Keyword);
 			items.add(item);
 			existingNames.add(keyword);
+		}
+	}
+
+	private void populateLiveTemplateItems(String namePrefix, Set<String> existingNames, List<CompletionItem> items) {
+		String prefix = namePrefix == null ? "" : namePrefix;
+		for (LiveTemplate template : LIVE_TEMPLATES) {
+			if (!template.trigger.startsWith(prefix)) {
+				continue;
+			}
+			CompletionItem item = new CompletionItem();
+			item.setLabel(template.label);
+			item.setKind(CompletionItemKind.Snippet);
+			item.setDetail(template.description);
+			item.setInsertText(template.snippet);
+			item.setInsertTextFormat(InsertTextFormat.Snippet);
+			item.setDocumentation(new MarkupContent(MarkupKind.MARKDOWN, 
+					"**" + template.description + "**\n\n```groovy\n" + 
+					template.snippet.replace("${0}", "").replace("${1:item}", "item")
+						.replace("${2:collection}", "collection") + "\n```"));
+			items.add(item);
 		}
 	}
 

@@ -31,6 +31,7 @@ import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
+import org.eclipse.lsp4j.InsertTextFormat;
 import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.Position;
@@ -814,5 +815,89 @@ class GroovyServicesCompletionTests {
 			return item.getLabel().equals("dynamicMethod") && item.getKind().equals(CompletionItemKind.Method);
 		}).collect(Collectors.toList());
 		Assertions.assertEquals(1, filteredItems.size());
+	}
+
+	@Test
+	void testLiveTemplateMain() throws Exception {
+		Path filePath = srcRoot.resolve("Completion.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class Completion {\n");
+		contents.append("  public void testMethod() {\n");
+		contents.append("    ma\n");
+		contents.append("  }\n");
+		contents.append("}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(2, 6);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("main") && item.getKind().equals(CompletionItemKind.Snippet);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+		CompletionItem mainItem = filteredItems.get(0);
+		Assertions.assertEquals(InsertTextFormat.Snippet, mainItem.getInsertTextFormat());
+		Assertions.assertNotNull(mainItem.getInsertText());
+		Assertions.assertTrue(mainItem.getInsertText().contains("static void main"));
+	}
+
+	@Test
+	void testLiveTemplatePsvm() throws Exception {
+		Path filePath = srcRoot.resolve("Completion.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class Completion {\n");
+		contents.append("  public void testMethod() {\n");
+		contents.append("    psv\n");
+		contents.append("  }\n");
+		contents.append("}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(2, 7);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("psvm") && item.getKind().equals(CompletionItemKind.Snippet);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+		CompletionItem psvmItem = filteredItems.get(0);
+		Assertions.assertEquals(InsertTextFormat.Snippet, psvmItem.getInsertTextFormat());
+		Assertions.assertNotNull(psvmItem.getInsertText());
+		Assertions.assertTrue(psvmItem.getInsertText().contains("public static void main"));
+	}
+
+	@Test
+	void testLiveTemplateFor() throws Exception {
+		Path filePath = srcRoot.resolve("Completion.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class Completion {\n");
+		contents.append("  public void testMethod() {\n");
+		contents.append("    fo\n");
+		contents.append("  }\n");
+		contents.append("}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(2, 6);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("for") && item.getKind().equals(CompletionItemKind.Snippet);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+		CompletionItem forItem = filteredItems.get(0);
+		Assertions.assertEquals(InsertTextFormat.Snippet, forItem.getInsertTextFormat());
+		Assertions.assertNotNull(forItem.getInsertText());
+		Assertions.assertTrue(forItem.getInsertText().contains("for ("));
 	}
 }
