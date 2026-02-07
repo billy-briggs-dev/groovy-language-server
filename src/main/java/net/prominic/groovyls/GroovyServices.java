@@ -88,7 +88,18 @@ import org.eclipse.lsp4j.SignatureHelpParams;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
+import org.eclipse.lsp4j.ImplementationParams;
 import org.eclipse.lsp4j.TypeDefinitionParams;
+import org.eclipse.lsp4j.TypeHierarchyItem;
+import org.eclipse.lsp4j.TypeHierarchyPrepareParams;
+import org.eclipse.lsp4j.TypeHierarchySubtypesParams;
+import org.eclipse.lsp4j.TypeHierarchySupertypesParams;
+import org.eclipse.lsp4j.CallHierarchyItem;
+import org.eclipse.lsp4j.CallHierarchyPrepareParams;
+import org.eclipse.lsp4j.CallHierarchyIncomingCall;
+import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
+import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
+import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
@@ -108,6 +119,9 @@ import net.prominic.groovyls.compiler.control.GroovyLSCompilationUnit;
 import net.prominic.groovyls.config.ICompilationUnitFactory;
 import net.prominic.groovyls.providers.CompletionProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
+import net.prominic.groovyls.providers.ImplementationProvider;
+import net.prominic.groovyls.providers.TypeHierarchyProvider;
+import net.prominic.groovyls.providers.CallHierarchyProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
 import net.prominic.groovyls.providers.HoverProvider;
 import net.prominic.groovyls.providers.ReferenceProvider;
@@ -374,6 +388,16 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 	}
 
 	@Override
+	public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> implementation(
+			ImplementationParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		ImplementationProvider provider = new ImplementationProvider(astVisitor);
+		return provider.provideImplementation(params.getTextDocument(), params.getPosition());
+	}
+
+	@Override
 	public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
 		URI uri = URI.create(params.getTextDocument().getUri());
 		ensureCompiledForRequest(uri);
@@ -407,6 +431,58 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		RenameProvider provider = new RenameProvider(astVisitor, fileContentsTracker);
 		return provider.provideRename(params);
+	}
+
+	@Override
+	public CompletableFuture<List<CallHierarchyItem>> prepareCallHierarchy(CallHierarchyPrepareParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		CallHierarchyProvider provider = new CallHierarchyProvider(astVisitor);
+		return provider.prepareCallHierarchy(params);
+	}
+
+	@Override
+	public CompletableFuture<List<CallHierarchyIncomingCall>> callHierarchyIncomingCalls(
+			CallHierarchyIncomingCallsParams params) {
+		ensureAstAvailable();
+
+		CallHierarchyProvider provider = new CallHierarchyProvider(astVisitor);
+		return provider.incomingCalls(params);
+	}
+
+	@Override
+	public CompletableFuture<List<CallHierarchyOutgoingCall>> callHierarchyOutgoingCalls(
+			CallHierarchyOutgoingCallsParams params) {
+		ensureAstAvailable();
+
+		CallHierarchyProvider provider = new CallHierarchyProvider(astVisitor);
+		return provider.outgoingCalls(params);
+	}
+
+	@Override
+	public CompletableFuture<List<TypeHierarchyItem>> prepareTypeHierarchy(TypeHierarchyPrepareParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		TypeHierarchyProvider provider = new TypeHierarchyProvider(astVisitor);
+		return provider.prepareTypeHierarchy(params);
+	}
+
+	@Override
+	public CompletableFuture<List<TypeHierarchyItem>> typeHierarchySupertypes(TypeHierarchySupertypesParams params) {
+		ensureAstAvailable();
+
+		TypeHierarchyProvider provider = new TypeHierarchyProvider(astVisitor);
+		return provider.supertypes(params);
+	}
+
+	@Override
+	public CompletableFuture<List<TypeHierarchyItem>> typeHierarchySubtypes(TypeHierarchySubtypesParams params) {
+		ensureAstAvailable();
+
+		TypeHierarchyProvider provider = new TypeHierarchyProvider(astVisitor);
+		return provider.subtypes(params);
 	}
 
 	// --- INTERNAL
