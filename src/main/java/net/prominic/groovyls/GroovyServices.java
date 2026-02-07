@@ -88,6 +88,7 @@ import org.eclipse.lsp4j.SignatureHelpParams;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
+import org.eclipse.lsp4j.ImplementationParams;
 import org.eclipse.lsp4j.TypeDefinitionParams;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.WorkspaceEdit;
@@ -108,6 +109,7 @@ import net.prominic.groovyls.compiler.control.GroovyLSCompilationUnit;
 import net.prominic.groovyls.config.ICompilationUnitFactory;
 import net.prominic.groovyls.providers.CompletionProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
+import net.prominic.groovyls.providers.ImplementationProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
 import net.prominic.groovyls.providers.HoverProvider;
 import net.prominic.groovyls.providers.ReferenceProvider;
@@ -371,6 +373,16 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		TypeDefinitionProvider provider = new TypeDefinitionProvider(astVisitor);
 		return provider.provideTypeDefinition(params.getTextDocument(), params.getPosition());
+	}
+
+	@Override
+	public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> implementation(
+			ImplementationParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		ImplementationProvider provider = new ImplementationProvider(astVisitor);
+		return provider.provideImplementation(params.getTextDocument(), params.getPosition());
 	}
 
 	@Override
