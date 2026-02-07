@@ -67,6 +67,8 @@ Moonshine IDE natively provides a Grails project type that automatically configu
 
 For comprehensive documentation on features and roadmap:
 
+- **[ANALYSIS_SUMMARY.md](ANALYSIS_SUMMARY.md)** - Executive summary of missing features analysis (start here!)
 - **[FEATURES.md](FEATURES.md)** - Detailed feature parity roadmap with IntelliJ IDEA, implementation status, and planned features
 - **[MISSING_FEATURES_ANALYSIS.md](MISSING_FEATURES_ANALYSIS.md)** - Complete analysis of missing LSP features with prioritization and recommendations
 - **[LSP_FEATURE_CHECKLIST.md](LSP_FEATURE_CHECKLIST.md)** - Quick reference checklist for LSP feature implementation status
+- **[CONTRIBUTING_FEATURES.md](CONTRIBUTING_FEATURES.md)** - Guide for implementing missing features (for contributors)
