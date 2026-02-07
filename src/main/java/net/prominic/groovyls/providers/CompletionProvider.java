@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.CompletableFuture;
@@ -114,8 +115,8 @@ public class CompletionProvider {
 					"if (${1:condition}) {\n\t${2:// true branch}\n} else {\n\t${0:// false branch}\n}")
 	);
 
-	// Custom templates can be added at runtime
-	private List<LiveTemplate> customTemplates = new ArrayList<>();
+	// Custom templates can be added at runtime (thread-safe list)
+	private List<LiveTemplate> customTemplates = new CopyOnWriteArrayList<>();
 
 	private ASTNodeVisitor ast;
 	private ScanResult classGraphScanResult;
@@ -778,15 +779,28 @@ public class CompletionProvider {
 		item.setDetail(template.description);
 		item.setInsertText(template.snippet);
 		item.setInsertTextFormat(InsertTextFormat.Snippet);
-		// Create documentation showing the template
-		String docSnippet = template.snippet
-				.replace("${0}", "")
-				.replace("${0:", "")
-				.replaceAll("\\$\\{\\d+:([^}]+)\\}", "$1")
-				.replaceAll("\\$\\{\\d+\\}", "");
+		// Create documentation showing the template with placeholders removed
+		// Note: This is a simple implementation that handles basic placeholder patterns.
+		// Complex nested placeholders may not be perfectly cleaned.
+		String docSnippet = cleanSnippetPlaceholders(template.snippet);
 		item.setDocumentation(new MarkupContent(MarkupKind.MARKDOWN, 
 				"**" + template.description + "**\n\n```groovy\n" + docSnippet + "\n```"));
 		items.add(item);
+	}
+
+	/**
+	 * Removes snippet placeholders for documentation display.
+	 * Handles patterns like ${0}, ${1:default}, but may not handle complex nested cases.
+	 */
+	private String cleanSnippetPlaceholders(String snippet) {
+		String result = snippet;
+		// Remove final tab stop
+		result = result.replace("${0}", "");
+		// Remove placeholders with defaults like ${1:text} -> text
+		result = result.replaceAll("\\$\\{\\d+:([^}]+)\\}", "$1");
+		// Remove simple placeholders like ${1}
+		result = result.replaceAll("\\$\\{\\d+\\}", "");
+		return result;
 	}
 
 	private void populateTypes(ASTNode offsetNode, String namePrefix, Set<String> existingNames,
