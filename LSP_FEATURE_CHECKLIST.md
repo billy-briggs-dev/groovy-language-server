@@ -165,7 +165,7 @@ diagnosticProvider: false (MISSING - only push model)
 | Category | Implemented | Total | Coverage |
 |----------|-------------|-------|----------|
 | **Text Synchronization** | 5/5 | 5 | 100% |
-| **Navigation** | 10/10 | 10 | 100% |
+| **Navigation** | 9/10 | 10 | 90% |
 | **Code Intelligence** | 3/5 | 5 | 60% |
 | **Diagnostics** | 1/3 | 3 | 33% |
 | **Code Editing** | 2/6 | 6 | 33% |
@@ -173,7 +173,7 @@ diagnosticProvider: false (MISSING - only push model)
 | **Hierarchy** | 6/6 | 6 | 100% |
 | **Workspace** | 3/13 | 13 | 23% |
 | **Advanced** | 0/4 | 4 | 0% |
-| **TOTAL** | 33/63 | 63 | 52% |
+| **TOTAL** | 32/63 | 63 | 51% |
 
 ---
 

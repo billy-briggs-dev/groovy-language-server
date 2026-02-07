@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The Groovy Language Server currently implements **approximately 52% of the LSP specification**, with strong coverage in:
+The Groovy Language Server currently implements **approximately 51% of the LSP specification**, with strong coverage in:
 - ✅ Navigation features (go-to-definition, find references, type hierarchy)
 - ✅ Basic code intelligence (completion, hover, signature help)
 - ✅ Basic formatting support
@@ -45,12 +45,12 @@ The Groovy Language Server currently implements **approximately 52% of the LSP s
 | **textDocument/signatureHelp** | ✅ Implemented | `SignatureHelpProvider` | Function signatures, triggers: `(`, `,` |
 | **textDocument/formatting** | ✅ Implemented | `FormattingProvider` | Document formatting |
 | **textDocument/rangeFormatting** | ✅ Implemented | `FormattingProvider` | Range formatting |
-| **textDocument/rename** | ✅ Implemented | `RenameProvider` | Symbol renaming with prepareRename validation |
+| **textDocument/rename** | ✅ Implemented | `RenameProvider` | Symbol renaming |
+| **textDocument/prepareRename** | ✅ Implemented | `RenameProvider` | Validation before renaming |
 | **textDocument/diagnostic** | ⚠️ Partial | Built into `GroovyServices` | Push diagnostics only, syntax errors + some semantic |
 | **textDocument/foldingRange** | ✅ Implemented | `FoldingRangeProvider` | Code folding for classes, methods, closures, imports |
 | **textDocument/selectionRange** | ✅ Implemented | `SelectionRangeProvider` | Smart selection expansion |
 | **textDocument/codeLens** | ✅ Implemented | `CodeLensProvider` | Reference counts above symbols |
-| **textDocument/prepareRename** | ✅ Implemented | `RenameProvider` | Validation before renaming |
 
 ### ✅ Workspace Capabilities
 
