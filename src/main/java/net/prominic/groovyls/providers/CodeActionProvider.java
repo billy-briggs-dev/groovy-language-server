@@ -36,7 +36,6 @@ import org.codehaus.groovy.ast.FieldNode;
 import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.Parameter;
 import org.codehaus.groovy.ast.PropertyNode;
-import org.codehaus.groovy.ast.tools.GenericsUtils;
 import org.eclipse.lsp4j.CodeAction;
 import org.eclipse.lsp4j.CodeActionKind;
 import org.eclipse.lsp4j.CodeActionParams;
@@ -50,6 +49,8 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import net.prominic.groovyls.compiler.ast.ASTNodeVisitor;
 
 public class CodeActionProvider {
+	private static final int MAX_OVERRIDE_METHODS = 3;
+
 	private ASTNodeVisitor ast;
 
 	public CodeActionProvider(ASTNodeVisitor ast) {
@@ -247,6 +248,7 @@ public class CodeActionProvider {
 		ClassNode superClass = classNode.getSuperClass();
 		if (superClass != null && !superClass.equals(ClassNode.SUPER)) {
 			for (MethodNode method : superClass.getMethods()) {
+				// Skip constructors (represented as "<init>"), static, final, and private methods
 				if (!method.isStatic() && !method.isFinal() && !method.isPrivate() 
 						&& !hasMethodWithSignature(classNode, method)
 						&& !method.getName().equals("<init>")) {
@@ -370,8 +372,8 @@ public class CodeActionProvider {
 
 	private WorkspaceEdit createOverrideMethodsEdit(ClassNode classNode, List<MethodNode> methods, URI uri) {
 		StringBuilder code = new StringBuilder();
-		// Only override the first few methods to avoid overwhelming
-		int count = Math.min(methods.size(), 3);
+		// Limit to first few methods to avoid overwhelming the user
+		int count = Math.min(methods.size(), MAX_OVERRIDE_METHODS);
 		for (int i = 0; i < count; i++) {
 			MethodNode method = methods.get(i);
 			code.append("\n    @Override\n    ");
@@ -399,7 +401,6 @@ public class CodeActionProvider {
 	private String generateGetter(FieldNode field) {
 		String fieldName = field.getName();
 		String methodName = "get" + capitalize(fieldName);
-		String typeName = field.getType().getNameWithoutPackage();
 		return String.format("def %s() {\n        return %s\n    }", methodName, fieldName);
 	}
 
@@ -457,6 +458,7 @@ public class CodeActionProvider {
 				.collect(Collectors.toList());
 
 		StringBuilder body = new StringBuilder();
+		// Use Groovy's is() method for identity comparison (checks if same object reference)
 		body.append("if (this.is(other)) return true\n");
 		body.append("        if (other == null || getClass() != other.getClass()) return false\n");
 		body.append("        ").append(classNode.getNameWithoutPackage()).append(" that = (")
@@ -478,10 +480,12 @@ public class CodeActionProvider {
 				.collect(Collectors.toList());
 
 		StringBuilder body = new StringBuilder();
+		// Use 17 as initial value (common prime for hash functions)
 		body.append("int result = 17\n");
 
 		for (FieldNode field : fields) {
 			String fieldName = field.getName();
+			// Use 31 as multiplier (common prime for hash functions)
 			body.append("        result = 31 * result + (").append(fieldName)
 					.append(" != null ? ").append(fieldName).append(".hashCode() : 0)\n");
 		}
