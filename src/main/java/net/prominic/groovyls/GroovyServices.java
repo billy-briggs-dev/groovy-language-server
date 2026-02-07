@@ -126,6 +126,8 @@ import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CallHierarchyPrepareParams;
 import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
+import org.eclipse.lsp4j.FoldingRange;
+import org.eclipse.lsp4j.FoldingRangeRequestParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageClientAware;
@@ -143,6 +145,7 @@ import net.prominic.groovyls.providers.CompletionProvider;
 import net.prominic.groovyls.providers.CallHierarchyProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
+import net.prominic.groovyls.providers.FoldingRangeProvider;
 import net.prominic.groovyls.providers.GspTemplateSymbolProvider;
 import net.prominic.groovyls.providers.ImplementationProvider;
 import net.prominic.groovyls.providers.FormattingProvider;
@@ -721,6 +724,15 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		RenameProvider provider = new RenameProvider(astVisitor, fileContentsTracker);
 		return provider.provideRename(params);
+	}
+
+	@Override
+	public CompletableFuture<List<FoldingRange>> foldingRange(FoldingRangeRequestParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		FoldingRangeProvider provider = new FoldingRangeProvider(astVisitor);
+		return provider.provideFoldingRanges(params.getTextDocument());
 	}
 
 	@Override

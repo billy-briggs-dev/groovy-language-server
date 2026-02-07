@@ -7,6 +7,7 @@ The following language server protocol requests are currently supported:
 - completion
 - definition
 - documentSymbol
+- foldingRange
 - formatting (document/range)
 - hover
 - references

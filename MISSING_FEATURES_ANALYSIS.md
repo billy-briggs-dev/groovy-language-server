@@ -156,19 +156,17 @@ These are **standard LSP features** that should be implemented for feature compl
 
 ### ❌ Folding Ranges (Code Folding)
 
-**Status:** Not Implemented  
-**Impact:** Medium - Users cannot collapse code blocks  
+**Status:** ✅ Now Implemented  
+**Impact:** Medium - Users can collapse code blocks  
 **LSP Methods:**
-- `textDocument/foldingRange` - Not implemented
+- `textDocument/foldingRange` - ✅ Implemented
 
-**What's Missing:**
+**What it provides:**
 - Fold methods, classes, closures
-- Fold imports, comments
-- Fold blocks (if/else, try/catch, etc.)
-- Custom folding regions
+- Fold imports section
+- Fold blocks (multi-line constructs)
 
-**Difficulty:** Low-Medium  
-**Recommendation:** Walk the AST and return ranges for foldable constructs.
+**Implementation:** Walks AST and returns ranges for foldable constructs (classes, methods, closures, imports).
 
 ---
 

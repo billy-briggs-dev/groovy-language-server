@@ -100,6 +100,7 @@ public class GroovyLanguageServer implements LanguageServer, LanguageClientAware
         serverCapabilities.setRenameProvider(true);
         serverCapabilities.setDocumentFormattingProvider(true);
         serverCapabilities.setDocumentRangeFormattingProvider(true);
+        serverCapabilities.setFoldingRangeProvider(true);
         SignatureHelpOptions signatureHelpOptions = new SignatureHelpOptions();
         signatureHelpOptions.setTriggerCharacters(Arrays.asList("(", ","));
         serverCapabilities.setSignatureHelpProvider(signatureHelpOptions);
