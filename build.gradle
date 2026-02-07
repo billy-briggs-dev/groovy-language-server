@@ -34,6 +34,10 @@ dependencies {
   implementation "com.google.code.gson:gson:2.13.1"
   implementation "io.github.classgraph:classgraph:4.8.179"
   implementation "org.gradle:gradle-tooling-api:9.3.0"
+  // Test framework support - needed for annotation detection
+  compileOnly "org.junit.jupiter:junit-jupiter-api:5.11.4"
+  compileOnly "org.testng:testng:7.10.2"
+  compileOnly "org.spockframework:spock-core:2.4-M4-groovy-4.0"
   testImplementation platform("org.junit:junit-bom:5.11.4")
   testImplementation "org.junit.jupiter:junit-jupiter-api"
   testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"
