@@ -30,6 +30,7 @@ import org.eclipse.lsp4j.Range;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -126,7 +127,7 @@ public class TestDetectionProvider {
                 Command runCommand = new Command(
                     "▶ Run Test",
                     "groovyls.test.runMethod",
-                    List.of(classNode.getName(), method.getName())
+                    Arrays.asList(classNode.getName(), method.getName())
                 );
                 
                 CodeLens lens = new CodeLens(range, runCommand, null);

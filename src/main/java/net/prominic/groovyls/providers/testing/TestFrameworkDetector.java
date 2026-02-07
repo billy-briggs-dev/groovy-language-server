@@ -129,9 +129,10 @@ public class TestFrameworkDetector {
                 List<AnnotationNode> annotations = method.getAnnotations();
                 for (AnnotationNode annotation : annotations) {
                     String annotationName = annotation.getClassNode().getName();
-                    if (annotationName.contains("junit")) {
+                    if (JUNIT_TEST_ANNOTATION.equals(annotationName) || 
+                        JUNIT_TEST_ANNOTATION_SHORT.equals(annotationName)) {
                         return TestFramework.JUNIT;
-                    } else if (annotationName.contains("testng")) {
+                    } else if (TESTNG_TEST_ANNOTATION.equals(annotationName)) {
                         return TestFramework.TESTNG;
                     }
                 }
