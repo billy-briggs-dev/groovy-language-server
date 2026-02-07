@@ -63,6 +63,8 @@ import org.codehaus.groovy.syntax.SyntaxException;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
+import org.eclipse.lsp4j.CodeLens;
+import org.eclipse.lsp4j.CodeLensParams;
 import org.eclipse.lsp4j.DefinitionParams;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
@@ -115,6 +117,7 @@ import net.prominic.groovyls.providers.RenameProvider;
 import net.prominic.groovyls.providers.SignatureHelpProvider;
 import net.prominic.groovyls.providers.TypeDefinitionProvider;
 import net.prominic.groovyls.providers.WorkspaceSymbolProvider;
+import net.prominic.groovyls.providers.testing.TestDetectionProvider;
 import net.prominic.groovyls.util.FileContentsTracker;
 import net.prominic.groovyls.util.GradleClasspathResolver;
 import net.prominic.groovyls.util.GradleProjectDetector;
@@ -407,6 +410,15 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		RenameProvider provider = new RenameProvider(astVisitor, fileContentsTracker);
 		return provider.provideRename(params);
+	}
+
+	@Override
+	public CompletableFuture<List<? extends CodeLens>> codeLens(CodeLensParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		TestDetectionProvider provider = new TestDetectionProvider(astVisitor);
+		return CompletableFuture.completedFuture(provider.provideCodeLenses(uri));
 	}
 
 	// --- INTERNAL
