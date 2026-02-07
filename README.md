@@ -2,9 +2,11 @@
 
 A [language server](https://microsoft.github.io/language-server-protocol/) for [Groovy](http://groovy-lang.org/).
 
+## Features
+
 The following language server protocol requests are currently supported:
 
-- completion
+- completion (with live templates/snippets)
 - definition
 - documentSymbol
 - hover
@@ -13,6 +15,17 @@ The following language server protocol requests are currently supported:
 - signatureHelp
 - symbol
 - typeDefinition
+
+### Live Templates
+
+The server supports code snippets (live templates) for common code patterns:
+- Built-in templates: `main`, `psvm`, `for`
+- Surround-with templates: `trycatch`, `ifelse`
+- Custom template support
+
+See [LIVE_TEMPLATES.md](LIVE_TEMPLATES.md) for details.
+
+## Configuration
 
 The following configuration options are supported:
 

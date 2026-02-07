@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.CompletableFuture;
@@ -56,6 +57,7 @@ import org.eclipse.lsp4j.CompletionContext;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
+import org.eclipse.lsp4j.InsertTextFormat;
 import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
 import org.eclipse.lsp4j.Position;
@@ -84,6 +86,38 @@ public class CompletionProvider {
 			"public", "return", "static", "strictfp", "super", "switch", "synchronized", "this", "throw",
 			"throws", "trait", "transient", "true", "try", "volatile", "while");
 
+	// Live template definitions
+	private static class LiveTemplate {
+		String trigger;
+		String label;
+		String description;
+		String snippet;
+
+		LiveTemplate(String trigger, String label, String description, String snippet) {
+			this.trigger = trigger;
+			this.label = label;
+			this.description = description;
+			this.snippet = snippet;
+		}
+	}
+
+	private static final List<LiveTemplate> LIVE_TEMPLATES = Arrays.asList(
+			new LiveTemplate("main", "main", "Main method",
+					"static void main(String[] args) {\n\t${0}\n}"),
+			new LiveTemplate("psvm", "psvm", "public static void main",
+					"public static void main(String[] args) {\n\t${0}\n}"),
+			new LiveTemplate("for", "for", "For loop",
+					"for (${1:item} in ${2:collection}) {\n\t${0}\n}"),
+			// Surround-with templates
+			new LiveTemplate("trycatch", "trycatch", "Try-catch block",
+					"try {\n\t${1:// code}\n} catch (${2:Exception} ${3:e}) {\n\t${0:// handle exception}\n}"),
+			new LiveTemplate("ifelse", "ifelse", "If-else block",
+					"if (${1:condition}) {\n\t${2:// true branch}\n} else {\n\t${0:// false branch}\n}")
+	);
+
+	// Custom templates can be added at runtime (thread-safe list)
+	private List<LiveTemplate> customTemplates = new CopyOnWriteArrayList<>();
+
 	private ASTNodeVisitor ast;
 	private ScanResult classGraphScanResult;
 	private FileContentsTracker files;
@@ -96,6 +130,17 @@ public class CompletionProvider {
 		this.ast = ast;
 		this.classGraphScanResult = classGraphScanResult;
 		this.files = files;
+	}
+
+	/**
+	 * Adds a custom live template.
+	 * @param trigger The trigger text for the template
+	 * @param label The label shown in completion
+	 * @param description Description of the template
+	 * @param snippet The snippet text with placeholders
+	 */
+	public void addCustomTemplate(String trigger, String label, String description, String snippet) {
+		customTemplates.add(new LiveTemplate(trigger, label, description, snippet));
 	}
 
 	public CompletableFuture<Either<List<CompletionItem>, CompletionList>> provideCompletion(
@@ -689,6 +734,7 @@ public class CompletionProvider {
 			current = ast.getParent(current);
 		}
 		populateKeywordItems(namePrefix, existingNames, items);
+		populateLiveTemplateItems(namePrefix, existingNames, items);
 		if (namePrefix != null && !namePrefix.isEmpty()) {
 			populateTypes(node, namePrefix, existingNames, items);
 		}
@@ -706,6 +752,55 @@ public class CompletionProvider {
 			items.add(item);
 			existingNames.add(keyword);
 		}
+	}
+
+	private void populateLiveTemplateItems(String namePrefix, Set<String> existingNames, List<CompletionItem> items) {
+		String prefix = namePrefix == null ? "" : namePrefix;
+		// Add built-in templates
+		for (LiveTemplate template : LIVE_TEMPLATES) {
+			if (!template.trigger.startsWith(prefix)) {
+				continue;
+			}
+			addTemplateCompletionItem(template, items);
+		}
+		// Add custom templates
+		for (LiveTemplate template : customTemplates) {
+			if (!template.trigger.startsWith(prefix)) {
+				continue;
+			}
+			addTemplateCompletionItem(template, items);
+		}
+	}
+
+	private void addTemplateCompletionItem(LiveTemplate template, List<CompletionItem> items) {
+		CompletionItem item = new CompletionItem();
+		item.setLabel(template.label);
+		item.setKind(CompletionItemKind.Snippet);
+		item.setDetail(template.description);
+		item.setInsertText(template.snippet);
+		item.setInsertTextFormat(InsertTextFormat.Snippet);
+		// Create documentation showing the template with placeholders removed
+		// Note: This is a simple implementation that handles basic placeholder patterns.
+		// Complex nested placeholders may not be perfectly cleaned.
+		String docSnippet = cleanSnippetPlaceholders(template.snippet);
+		item.setDocumentation(new MarkupContent(MarkupKind.MARKDOWN, 
+				"**" + template.description + "**\n\n```groovy\n" + docSnippet + "\n```"));
+		items.add(item);
+	}
+
+	/**
+	 * Removes snippet placeholders for documentation display.
+	 * Handles patterns like ${0}, ${1:default}, but may not handle complex nested cases.
+	 */
+	private String cleanSnippetPlaceholders(String snippet) {
+		String result = snippet;
+		// Remove final tab stop
+		result = result.replace("${0}", "");
+		// Remove placeholders with defaults like ${1:text} -> text
+		result = result.replaceAll("\\$\\{\\d+:([^}]+)\\}", "$1");
+		// Remove simple placeholders like ${1}
+		result = result.replaceAll("\\$\\{\\d+\\}", "");
+		return result;
 	}
 
 	private void populateTypes(ASTNode offsetNode, String namePrefix, Set<String> existingNames,

@@ -232,15 +232,17 @@ Based on my research of IntelliJ IDEA's capabilities and the existing groovy-lan
 - [ ] **Override methods**
 
 ### 17. **Live Templates**
-- [ ] **Built-in templates**
+- [x] **Built-in templates**
   - `main` → main method
   - `psvm` → public static void main
   - `for` → for loop
   
-- [ ] **Custom templates**
-- [ ] **Surround with templates**
-  - try-catch
-  - if-else
+- [x] **Custom templates**
+  - Programmatic API for adding custom templates
+  
+- [x] **Surround with templates**
+  - `trycatch` → try-catch block
+  - `ifelse` → if-else block
 
 ## 🔵 Nice to Have Features
 
