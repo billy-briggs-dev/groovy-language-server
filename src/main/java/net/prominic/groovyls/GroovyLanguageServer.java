@@ -30,6 +30,7 @@ import java.util.concurrent.CompletableFuture;
 
 import org.eclipse.lsp4j.CompletionOptions;
 import org.eclipse.lsp4j.CodeLensOptions;
+import org.eclipse.lsp4j.ExecuteCommandOptions;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.ServerCapabilities;
@@ -95,6 +96,10 @@ public class GroovyLanguageServer implements LanguageServer, LanguageClientAware
         serverCapabilities.setSignatureHelpProvider(signatureHelpOptions);
         CodeLensOptions codeLensOptions = new CodeLensOptions(false);
         serverCapabilities.setCodeLensProvider(codeLensOptions);
+        ExecuteCommandOptions executeCommandOptions = new ExecuteCommandOptions(
+            Arrays.asList("groovyls.test.runClass", "groovyls.test.runMethod")
+        );
+        serverCapabilities.setExecuteCommandProvider(executeCommandOptions);
 
         InitializeResult initializeResult = new InitializeResult(serverCapabilities);
         return CompletableFuture.completedFuture(initializeResult);
