@@ -900,4 +900,62 @@ class GroovyServicesCompletionTests {
 		Assertions.assertNotNull(forItem.getInsertText());
 		Assertions.assertTrue(forItem.getInsertText().contains("for ("));
 	}
+
+	@Test
+	void testLiveTemplateTryCatch() throws Exception {
+		Path filePath = srcRoot.resolve("Completion.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class Completion {\n");
+		contents.append("  public void testMethod() {\n");
+		contents.append("    tryca\n");
+		contents.append("  }\n");
+		contents.append("}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(2, 9);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("trycatch") && item.getKind().equals(CompletionItemKind.Snippet);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+		CompletionItem tryCatchItem = filteredItems.get(0);
+		Assertions.assertEquals(InsertTextFormat.Snippet, tryCatchItem.getInsertTextFormat());
+		Assertions.assertNotNull(tryCatchItem.getInsertText());
+		Assertions.assertTrue(tryCatchItem.getInsertText().contains("try"));
+		Assertions.assertTrue(tryCatchItem.getInsertText().contains("catch"));
+	}
+
+	@Test
+	void testLiveTemplateIfElse() throws Exception {
+		Path filePath = srcRoot.resolve("Completion.groovy");
+		String uri = filePath.toUri().toString();
+		StringBuilder contents = new StringBuilder();
+		contents.append("class Completion {\n");
+		contents.append("  public void testMethod() {\n");
+		contents.append("    ifel\n");
+		contents.append("  }\n");
+		contents.append("}");
+		TextDocumentItem textDocumentItem = new TextDocumentItem(uri, LANGUAGE_GROOVY, 1, contents.toString());
+		services.didOpen(new DidOpenTextDocumentParams(textDocumentItem));
+		TextDocumentIdentifier textDocument = new TextDocumentIdentifier(uri);
+		Position position = new Position(2, 8);
+		Either<List<CompletionItem>, CompletionList> result = services
+				.completion(new CompletionParams(textDocument, position)).get();
+		Assertions.assertTrue(result.isLeft());
+		List<CompletionItem> items = result.getLeft();
+		List<CompletionItem> filteredItems = items.stream().filter(item -> {
+			return item.getLabel().equals("ifelse") && item.getKind().equals(CompletionItemKind.Snippet);
+		}).collect(Collectors.toList());
+		Assertions.assertEquals(1, filteredItems.size());
+		CompletionItem ifElseItem = filteredItems.get(0);
+		Assertions.assertEquals(InsertTextFormat.Snippet, ifElseItem.getInsertTextFormat());
+		Assertions.assertNotNull(ifElseItem.getInsertText());
+		Assertions.assertTrue(ifElseItem.getInsertText().contains("if ("));
+		Assertions.assertTrue(ifElseItem.getInsertText().contains("} else {"));
+	}
 }
