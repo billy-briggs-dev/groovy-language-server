@@ -89,18 +89,19 @@ public class ImplementationProvider {
 		List<Location> implementations = new ArrayList<>();
 		
 		// Search through all classes in the compilation units
-		for (URI uri : ast.getURIs()) {
-			for (ASTNode node : ast.getNodes(uri)) {
-				if (node instanceof ClassNode) {
-					ClassNode classNode = (ClassNode) node;
-					// Skip the class itself and skip interfaces/abstract classes
-					if (classNode == interfaceOrAbstractClass || classNode.isInterface() 
-							|| (classNode.isAbstract() && interfaceOrAbstractClass.isInterface())) {
-						continue;
-					}
-					
-					// Check if this class implements the interface or extends the abstract class
-					if (isImplementation(classNode, interfaceOrAbstractClass)) {
+		for (ASTNode node : ast.getNodes()) {
+			if (node instanceof ClassNode) {
+				ClassNode classNode = (ClassNode) node;
+				// Skip the class itself and skip interfaces/abstract classes
+				if (classNode == interfaceOrAbstractClass || classNode.isInterface() 
+						|| (classNode.isAbstract() && interfaceOrAbstractClass.isInterface())) {
+					continue;
+				}
+				
+				// Check if this class implements the interface or extends the abstract class
+				if (isImplementation(classNode, interfaceOrAbstractClass)) {
+					URI uri = ast.getURI(classNode);
+					if (uri != null) {
 						Location location = GroovyLanguageServerUtils.astNodeToLocation(classNode, uri);
 						if (location != null) {
 							implementations.add(location);
@@ -145,13 +146,15 @@ public class ImplementationProvider {
 		
 		// Find all classes that implement the interface or extend the abstract class
 		List<ClassNode> implementingClasses = new ArrayList<>();
-		for (URI uri : ast.getURIs()) {
-			for (ASTNode node : ast.getNodes(uri)) {
-				if (node instanceof ClassNode) {
-					ClassNode classNode = (ClassNode) node;
-					if (isImplementation(classNode, declaringClass)) {
-						implementingClasses.add(classNode);
-					}
+		for (ASTNode node : ast.getNodes()) {
+			if (node instanceof ClassNode) {
+				ClassNode classNode = (ClassNode) node;
+				// Skip the declaring class itself (interface or abstract class)
+				if (classNode.getName().equals(declaringClass.getName())) {
+					continue;
+				}
+				if (isImplementation(classNode, declaringClass)) {
+					implementingClasses.add(classNode);
 				}
 			}
 		}
@@ -159,11 +162,11 @@ public class ImplementationProvider {
 		// Find the method in each implementing class
 		for (ClassNode implementingClass : implementingClasses) {
 			MethodNode implementingMethod = findMatchingMethod(implementingClass, interfaceMethod);
-			if (implementingMethod != null) {
+			if (implementingMethod != null && implementingMethod != interfaceMethod) {
 				URI uri = ast.getURI(implementingMethod);
 				if (uri != null) {
 					Location location = GroovyLanguageServerUtils.astNodeToLocation(implementingMethod, uri);
-					if (location != null) {
+					if (location != null && !implementations.contains(location)) {
 						implementations.add(location);
 					}
 				}

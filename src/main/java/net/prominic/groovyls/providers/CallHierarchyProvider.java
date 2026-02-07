@@ -94,14 +94,15 @@ public class CallHierarchyProvider {
 		List<CallHierarchyIncomingCall> incomingCalls = new ArrayList<>();
 		
 		// Find all method call expressions that call this method
-		for (URI uri : ast.getURIs()) {
-			for (ASTNode node : ast.getNodes(uri)) {
-				if (node instanceof MethodCallExpression) {
-					MethodCallExpression callExpr = (MethodCallExpression) node;
-					MethodNode calledMethod = GroovyASTUtils.getMethodFromCallExpression(callExpr, ast);
-					
-					if (calledMethod != null && isSameMethod(calledMethod, methodNode)) {
-						// Find the enclosing method of this call
+		for (ASTNode node : ast.getNodes()) {
+			if (node instanceof MethodCallExpression) {
+				MethodCallExpression callExpr = (MethodCallExpression) node;
+				MethodNode calledMethod = GroovyASTUtils.getMethodFromCallExpression(callExpr, ast);
+				
+				if (calledMethod != null && isSameMethod(calledMethod, methodNode)) {
+					// Find the enclosing method of this call
+					URI uri = ast.getURI(callExpr);
+					if (uri != null) {
 						MethodNode callerMethod = findEnclosingMethod(callExpr, uri);
 						if (callerMethod != null) {
 							CallHierarchyItem callerItem = createCallHierarchyItem(callerMethod);
@@ -191,11 +192,6 @@ public class CallHierarchyProvider {
 		// Add class name as detail
 		if (methodNode.getDeclaringClass() != null) {
 			item.setDetail(methodNode.getDeclaringClass().getName());
-		}
-
-		// Add deprecated tag if needed
-		if (methodNode.isDeprecated()) {
-			item.setTags(Collections.singletonList(SymbolTag.Deprecated));
 		}
 
 		return item;

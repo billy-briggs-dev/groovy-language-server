@@ -137,13 +137,26 @@ public class TypeHierarchyProvider {
 		List<TypeHierarchyItem> subtypes = new ArrayList<>();
 		
 		// Search through all classes in the compilation units to find subtypes
-		for (URI uri : ast.getURIs()) {
-			for (ASTNode node : ast.getNodes(uri)) {
-				if (node instanceof ClassNode) {
-					ClassNode candidate = (ClassNode) node;
-					if (isSubtype(candidate, classNode)) {
-						TypeHierarchyItem subItem = createTypeHierarchyItem(candidate);
-						if (subItem != null) {
+		for (ASTNode node : ast.getNodes()) {
+			if (node instanceof ClassNode) {
+				ClassNode candidate = (ClassNode) node;
+				// Skip the class itself
+				if (candidate.getName().equals(classNode.getName())) {
+					continue;
+				}
+				if (isSubtype(candidate, classNode)) {
+					TypeHierarchyItem subItem = createTypeHierarchyItem(candidate);
+					if (subItem != null) {
+						// Check for duplicates based on name and URI
+						boolean isDuplicate = false;
+						for (TypeHierarchyItem existing : subtypes) {
+							if (existing.getName().equals(subItem.getName()) && 
+									existing.getUri().equals(subItem.getUri())) {
+								isDuplicate = true;
+								break;
+							}
+						}
+						if (!isDuplicate) {
 							subtypes.add(subItem);
 						}
 					}
@@ -177,23 +190,21 @@ public class TypeHierarchyProvider {
 			kind = SymbolKind.Class;
 		}
 
-		TypeHierarchyItem item = new TypeHierarchyItem();
-		item.setName(classNode.getName());
-		item.setKind(kind);
-		item.setUri(uri.toString());
-		item.setRange(range);
-		item.setSelectionRange(selectionRange);
-		
-		// Add deprecated tag if needed
-		if (classNode.isDeprecated()) {
-			item.setTags(Collections.singletonList(SymbolTag.Deprecated));
-		}
-
 		// Set detail (package name)
+		String detail = null;
 		String packageName = classNode.getPackageName();
 		if (packageName != null && !packageName.isEmpty()) {
-			item.setDetail(packageName);
+			detail = packageName;
 		}
+
+		TypeHierarchyItem item = new TypeHierarchyItem(
+			classNode.getName(),
+			kind,
+			uri.toString(),
+			range,
+			selectionRange,
+			detail
+		);
 
 		return item;
 	}
