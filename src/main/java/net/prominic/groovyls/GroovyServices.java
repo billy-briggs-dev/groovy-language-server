@@ -63,7 +63,10 @@ import org.codehaus.groovy.syntax.SyntaxException;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
+import org.eclipse.lsp4j.CodeLens;
+import org.eclipse.lsp4j.CodeLensParams;
 import org.eclipse.lsp4j.DefinitionParams;
+import org.eclipse.lsp4j.ExecuteCommandParams;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
@@ -78,6 +81,8 @@ import org.eclipse.lsp4j.Hover;
 import org.eclipse.lsp4j.HoverParams;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.LocationLink;
+import org.eclipse.lsp4j.MessageParams;
+import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.Range;
@@ -115,6 +120,7 @@ import net.prominic.groovyls.providers.RenameProvider;
 import net.prominic.groovyls.providers.SignatureHelpProvider;
 import net.prominic.groovyls.providers.TypeDefinitionProvider;
 import net.prominic.groovyls.providers.WorkspaceSymbolProvider;
+import net.prominic.groovyls.providers.testing.TestDetectionProvider;
 import net.prominic.groovyls.util.FileContentsTracker;
 import net.prominic.groovyls.util.GradleClasspathResolver;
 import net.prominic.groovyls.util.GradleProjectDetector;
@@ -223,6 +229,50 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 		}
 		JsonObject settings = (JsonObject) params.getSettings();
 		this.updateClasspath(settings);
+	}
+
+	@Override
+	public CompletableFuture<Object> executeCommand(ExecuteCommandParams params) {
+		String command = params.getCommand();
+		
+		if ("groovyls.test.runClass".equals(command)) {
+			if (params.getArguments() != null && !params.getArguments().isEmpty()) {
+				String className = (String) params.getArguments().get(0);
+				return runTestClass(className);
+			}
+		} else if ("groovyls.test.runMethod".equals(command)) {
+			if (params.getArguments() != null && params.getArguments().size() >= 2) {
+				String className = (String) params.getArguments().get(0);
+				String methodName = (String) params.getArguments().get(1);
+				return runTestMethod(className, methodName);
+			}
+		}
+		
+		return CompletableFuture.completedFuture(null);
+	}
+
+	private CompletableFuture<Object> runTestClass(String className) {
+		// For now, just send a message to the client
+		// In a full implementation, this would use Gradle Tooling API to run the test
+		if (languageClient != null) {
+			languageClient.showMessage(new org.eclipse.lsp4j.MessageParams(
+				org.eclipse.lsp4j.MessageType.Info,
+				"Running all tests in class: " + className
+			));
+		}
+		return CompletableFuture.completedFuture(null);
+	}
+
+	private CompletableFuture<Object> runTestMethod(String className, String methodName) {
+		// For now, just send a message to the client
+		// In a full implementation, this would use Gradle Tooling API to run the specific test
+		if (languageClient != null) {
+			languageClient.showMessage(new org.eclipse.lsp4j.MessageParams(
+				org.eclipse.lsp4j.MessageType.Info,
+				"Running test: " + className + "." + methodName
+			));
+		}
+		return CompletableFuture.completedFuture(null);
 	}
 
 	private void updateClasspath(JsonObject settings) {
@@ -407,6 +457,15 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		RenameProvider provider = new RenameProvider(astVisitor, fileContentsTracker);
 		return provider.provideRename(params);
+	}
+
+	@Override
+	public CompletableFuture<List<? extends CodeLens>> codeLens(CodeLensParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		TestDetectionProvider provider = new TestDetectionProvider(astVisitor);
+		return CompletableFuture.completedFuture(provider.provideCodeLenses(uri));
 	}
 
 	// --- INTERNAL
