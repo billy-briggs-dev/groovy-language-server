@@ -126,6 +126,8 @@ import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CallHierarchyPrepareParams;
 import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
+import org.eclipse.lsp4j.CodeLens;
+import org.eclipse.lsp4j.CodeLensParams;
 import org.eclipse.lsp4j.FoldingRange;
 import org.eclipse.lsp4j.FoldingRangeRequestParams;
 import org.eclipse.lsp4j.PrepareRenameDefaultBehavior;
@@ -149,6 +151,7 @@ import net.prominic.groovyls.compiler.control.GroovyLSCompilationUnit;
 import net.prominic.groovyls.config.ICompilationUnitFactory;
 import net.prominic.groovyls.providers.CompletionProvider;
 import net.prominic.groovyls.providers.CallHierarchyProvider;
+import net.prominic.groovyls.providers.CodeLensProvider;
 import net.prominic.groovyls.providers.DefinitionProvider;
 import net.prominic.groovyls.providers.DocumentSymbolProvider;
 import net.prominic.groovyls.providers.FoldingRangeProvider;
@@ -766,6 +769,16 @@ public class GroovyServices implements TextDocumentService, WorkspaceService, La
 
 		SelectionRangeProvider provider = new SelectionRangeProvider(astVisitor);
 		return provider.provideSelectionRanges(params.getTextDocument(), params.getPositions());
+	}
+
+	@Override
+	public CompletableFuture<List<? extends CodeLens>> codeLens(CodeLensParams params) {
+		URI uri = URI.create(params.getTextDocument().getUri());
+		ensureCompiledForRequest(uri);
+
+		CodeLensProvider provider = new CodeLensProvider(astVisitor);
+		CompletableFuture<List<CodeLens>> result = provider.provideCodeLenses(params.getTextDocument());
+		return result.thenApply(lenses -> lenses);
 	}
 
 	@Override

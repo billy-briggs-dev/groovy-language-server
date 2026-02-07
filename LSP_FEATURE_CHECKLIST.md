@@ -61,8 +61,8 @@ Quick reference for LSP feature completeness in Groovy Language Server.
 - ❌ `textDocument/linkedEditingRange` - Linked editing
 
 ### Visual Features
-- ❌ `textDocument/codeLens` - Reference counts, actions
-- ❌ `codeLens/resolve` - Resolve code lens
+- ✅ `textDocument/codeLens` - Reference counts, actions (NEW!)
+- ❌ `codeLens/resolve` - Resolve code lens (not needed for basic functionality)
 - ✅ `textDocument/foldingRange` - Code folding (NEW!)
 - ❌ `textDocument/semanticTokens/full` - Syntax highlighting
 - ❌ `textDocument/semanticTokens/full/delta` - Incremental highlighting
@@ -175,11 +175,11 @@ diagnosticProvider: false (MISSING - only push model)
 | **Code Intelligence** | 3/5 | 5 | 60% |
 | **Diagnostics** | 1/3 | 3 | 33% |
 | **Code Editing** | 2/6 | 6 | 33% |
-| **Visual Features** | 1/10 | 10 | 10% |
+| **Visual Features** | 2/11 | 11 | 18% |
 | **Hierarchy** | 6/6 | 6 | 100% |
 | **Workspace** | 3/13 | 13 | 23% |
 | **Advanced** | 0/4 | 4 | 0% |
-| **TOTAL** | 30/62 | 62 | 48% |
+| **TOTAL** | 31/63 | 63 | 49% |
 
 ---
 

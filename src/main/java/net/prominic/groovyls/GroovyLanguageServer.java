@@ -28,6 +28,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 
+import org.eclipse.lsp4j.CodeLensOptions;
 import org.eclipse.lsp4j.CompletionOptions;
 import org.eclipse.lsp4j.ExecuteCommandOptions;
 import org.eclipse.lsp4j.InitializeParams;
@@ -105,6 +106,9 @@ public class GroovyLanguageServer implements LanguageServer, LanguageClientAware
         serverCapabilities.setDocumentRangeFormattingProvider(true);
         serverCapabilities.setFoldingRangeProvider(true);
         serverCapabilities.setSelectionRangeProvider(true);
+        CodeLensOptions codeLensOptions = new CodeLensOptions();
+        codeLensOptions.setResolveProvider(false);
+        serverCapabilities.setCodeLensProvider(codeLensOptions);
         SignatureHelpOptions signatureHelpOptions = new SignatureHelpOptions();
         signatureHelpOptions.setTriggerCharacters(Arrays.asList("(", ","));
         serverCapabilities.setSignatureHelpProvider(signatureHelpOptions);

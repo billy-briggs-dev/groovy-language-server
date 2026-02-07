@@ -4,6 +4,7 @@ A [language server](https://microsoft.github.io/language-server-protocol/) for [
 
 The following language server protocol requests are currently supported:
 
+- codeLens
 - completion
 - definition
 - documentSymbol

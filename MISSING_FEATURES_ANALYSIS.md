@@ -115,21 +115,18 @@ These are **standard LSP features** that should be implemented for feature compl
 
 ### ❌ Code Lens
 
-**Status:** Not Implemented  
-**Impact:** Medium - Missing visual indicators for references and implementations  
+**Status:** ✅ Now Implemented  
+**Impact:** High - Visual indicators for references and implementations  
 **LSP Methods:**
-- `textDocument/codeLens` - Not implemented
-- `codeLens/resolve` - Not implemented
+- `textDocument/codeLens` - ✅ Implemented
+- `codeLens/resolve` - Not implemented (not needed for basic functionality)
 
-**What's Missing:**
+**What it provides:**
 - Show reference counts above methods/classes ("5 references", "3 implementations")
-- Run test buttons for test methods
-- Override/implement indicators
-- Show usages inline
-- Quick actions (debug, profile, etc.)
+- Visual indicators for code usage
+- Quick access to find all references
 
-**Difficulty:** Low-Medium  
-**Recommendation:** Start with reference counts, as UsageProvider already tracks this data.
+**Implementation:** Created CodeLensProvider that walks AST and counts references using GroovyASTUtils.getReferences().
 
 ---
 
