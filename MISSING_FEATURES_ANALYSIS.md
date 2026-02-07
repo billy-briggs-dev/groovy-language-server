@@ -8,18 +8,20 @@
 
 ## Executive Summary
 
-The Groovy Language Server currently implements **approximately 45-50% of the LSP specification**, with strong coverage in:
+The Groovy Language Server currently implements **approximately 52% of the LSP specification**, with strong coverage in:
 - ✅ Navigation features (go-to-definition, find references, type hierarchy)
 - ✅ Basic code intelligence (completion, hover, signature help)
 - ✅ Basic formatting support
 - ✅ Some diagnostic capabilities (syntax errors, undefined variables)
+- ✅ Code folding (collapsible code blocks)
+- ✅ Smart selection ranges (semantic selection expansion)
+- ✅ Code lens (reference counts above symbols)
+- ✅ Prepare rename (validation before renaming)
 
 **Key gaps** exist in:
 - ❌ Code Actions (quick fixes, refactorings)
 - ❌ Advanced refactoring tools
-- ❌ Code Lens (reference counts, implementations)
 - ❌ Semantic Tokens (syntax highlighting)
-- ❌ Folding Ranges (code folding)
 - ❌ Inlay Hints (parameter names, type hints)
 - ❌ Advanced diagnostics and linting
 - ❌ Testing framework integration
@@ -43,8 +45,12 @@ The Groovy Language Server currently implements **approximately 45-50% of the LS
 | **textDocument/signatureHelp** | ✅ Implemented | `SignatureHelpProvider` | Function signatures, triggers: `(`, `,` |
 | **textDocument/formatting** | ✅ Implemented | `FormattingProvider` | Document formatting |
 | **textDocument/rangeFormatting** | ✅ Implemented | `FormattingProvider` | Range formatting |
-| **textDocument/rename** | ✅ Implemented | `RenameProvider` | Symbol renaming |
+| **textDocument/rename** | ✅ Implemented | `RenameProvider` | Symbol renaming with prepareRename validation |
 | **textDocument/diagnostic** | ⚠️ Partial | Built into `GroovyServices` | Push diagnostics only, syntax errors + some semantic |
+| **textDocument/foldingRange** | ✅ Implemented | `FoldingRangeProvider` | Code folding for classes, methods, closures, imports |
+| **textDocument/selectionRange** | ✅ Implemented | `SelectionRangeProvider` | Smart selection expansion |
+| **textDocument/codeLens** | ✅ Implemented | `CodeLensProvider` | Reference counts above symbols |
+| **textDocument/prepareRename** | ✅ Implemented | `RenameProvider` | Validation before renaming |
 
 ### ✅ Workspace Capabilities
 
@@ -554,38 +560,30 @@ The existing `FEATURES.md` already provides an excellent IntelliJ IDEA compariso
    - Type mismatches
    - Null safety warnings
 
-3. **Code Lens** - Visual indicators
-   - Reference counts
-   - Implementation counts
-   - Test runner buttons
-
 ### 🟡 High Priority (Next 6-12 months)
 
-4. **Semantic Tokens** - Better syntax highlighting
-5. **Folding Ranges** - Code folding support
-6. **Inlay Hints** - Parameter names and types
-7. **Smart Completion** - Type-aware filtering
-8. **Testing Integration** - Spock/JUnit support
-9. **Prepare Rename** - Validation before rename
+3. **Semantic Tokens** - Better syntax highlighting
+4. **Inlay Hints** - Parameter names and types
+5. **Smart Completion** - Type-aware filtering
+6. **Testing Integration** - Spock/JUnit support
 
 ### 🟢 Medium Priority (12-18 months)
 
-10. **Advanced Refactoring** - Extract method, inline, move class
-11. **Enhanced DSL Support** - Gradle/Jenkins completion
-12. **Documentation Rendering** - Markdown/HTML docs
-13. **Selection Range** - Smart selection expansion
-14. **Document Links** - Clickable URLs/paths
-15. **Performance Optimization** - Incremental compilation, caching
+7. **Advanced Refactoring** - Extract method, inline, move class
+8. **Enhanced DSL Support** - Gradle/Jenkins completion
+9. **Documentation Rendering** - Markdown/HTML docs
+10. **Document Links** - Clickable URLs/paths
+11. **Performance Optimization** - Incremental compilation, caching
 
 ### 🔵 Low Priority (18+ months or polish phase)
 
-16. **Pull Diagnostics** - Client-controlled diagnostics
-17. **Advanced Analysis** - Data flow, control flow
-18. **Linked Editing** - Simultaneous edits
-19. **Document Color** - Color picker
-20. **Debugging Enhancements** - Conditional breakpoints, hot reload
-21. **Code Generation Templates** - Live templates
-22. **Breadcrumbs** - Scope visualization
+12. **Pull Diagnostics** - Client-controlled diagnostics
+13. **Advanced Analysis** - Data flow, control flow
+14. **Linked Editing** - Simultaneous edits
+15. **Document Color** - Color picker
+16. **Debugging Enhancements** - Conditional breakpoints, hot reload
+17. **Code Generation Templates** - Live templates
+18. **Breadcrumbs** - Scope visualization
 
 ---
 
@@ -594,8 +592,8 @@ The existing `FEATURES.md` already provides an excellent IntelliJ IDEA compariso
 ### Phase 1: Foundation (Next 3 months)
 - Implement Code Actions framework
 - Add "Add missing import" and "Remove unused import" actions
-- Implement Code Lens for reference counts
-- Add basic semantic tokens support
+- Implement inlay hints for parameter names
+- Enhanced diagnostics for unused declarations
 
 ### Phase 2: Enhanced Diagnostics (Months 3-6)
 - Detect unused declarations
@@ -603,10 +601,10 @@ The existing `FEATURES.md` already provides an excellent IntelliJ IDEA compariso
 - Improve error messages
 
 ### Phase 3: Editor Experience (Months 6-12)
-- Implement folding ranges
-- Add inlay hints
+- Implement semantic tokens
 - Enhance completion with type-aware filtering
-- Implement prepare rename
+- Add more code actions (extract method, inline)
+- Enhanced code lens features
 
 ### Phase 4: Advanced Features (Months 12-18)
 - Testing integration
@@ -669,9 +667,9 @@ Current key dependencies:
 ### Contribution Priorities
 
 For new contributors, good starting points:
-1. **Easy:** Document links, color support, selection range
-2. **Medium:** Folding ranges, code lens, prepare rename
-3. **Hard:** Code actions, semantic tokens, advanced refactoring
+1. **Easy:** Document links, color support
+2. **Medium:** Inlay hints, basic code actions
+3. **Hard:** Semantic tokens, advanced refactoring
 
 ---
 
@@ -681,8 +679,8 @@ The Groovy Language Server is a **solid foundation** with good navigation and ba
 
 1. **Code Actions** - Enable quick fixes and refactoring
 2. **Enhanced Diagnostics** - Catch more errors and warnings
-3. **Code Lens** - Visual indicators for references/implementations
-4. **Semantic Tokens** - Proper syntax highlighting
+3. **Semantic Tokens** - Proper syntax highlighting
+4. **Inlay Hints** - Parameter names and type hints
 5. **Testing Integration** - Support for Spock/JUnit
 
 Implementing these features over the next 12-18 months will significantly improve the developer experience and make the Groovy Language Server competitive with commercial IDEs.

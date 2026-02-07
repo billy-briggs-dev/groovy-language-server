@@ -27,9 +27,9 @@ Quick reference for LSP feature completeness in Groovy Language Server.
 - ✅ `textDocument/documentSymbol` - Document outline
 - ✅ `workspace/symbol` - Workspace-wide search
 - ❌ `textDocument/declaration` - Go to declaration
-- ✅ `textDocument/prepareRename` - Validate rename (NEW!)
+- ✅ `textDocument/prepareRename` - Validate rename
 - ✅ `textDocument/rename` - Rename symbol
-- ✅ `textDocument/selectionRange` - Smart selection (NEW!)
+- ✅ `textDocument/selectionRange` - Smart selection
 
 ### Code Intelligence
 - ✅ `textDocument/completion` - Code completion
@@ -40,7 +40,6 @@ Quick reference for LSP feature completeness in Groovy Language Server.
 - ✅ `textDocument/signatureHelp` - Function signatures
   - ✅ Trigger characters: `(`, `,`
 - ❌ `textDocument/inlayHint` - Inline parameter/type hints
-- ❌ `textDocument/selectionRange` - Smart selection
 
 ### Diagnostics
 - ⚠️ `textDocument/publishDiagnostics` - Push model only
@@ -61,9 +60,9 @@ Quick reference for LSP feature completeness in Groovy Language Server.
 - ❌ `textDocument/linkedEditingRange` - Linked editing
 
 ### Visual Features
-- ✅ `textDocument/codeLens` - Reference counts, actions (NEW!)
+- ✅ `textDocument/codeLens` - Reference counts, actions
 - ❌ `codeLens/resolve` - Resolve code lens (not needed for basic functionality)
-- ✅ `textDocument/foldingRange` - Code folding (NEW!)
+- ✅ `textDocument/foldingRange` - Code folding
 - ❌ `textDocument/semanticTokens/full` - Syntax highlighting
 - ❌ `textDocument/semanticTokens/full/delta` - Incremental highlighting
 - ❌ `textDocument/semanticTokens/range` - Range highlighting
@@ -116,9 +115,12 @@ implementationProvider: true
 typeHierarchyProvider: true
 callHierarchyProvider: true
 hoverProvider: true
-renameProvider: true
+renameProvider: { prepareProvider: true }
 documentFormattingProvider: true
 documentRangeFormattingProvider: true
+foldingRangeProvider: true
+selectionRangeProvider: true
+codeLensProvider: { resolveProvider: false }
 signatureHelpProvider: { triggerCharacters: ["(", ","] }
 executeCommandProvider: { commands: ["groovy.findUsages", "groovy.goToSuperMethod"] }
 ```
@@ -126,15 +128,11 @@ executeCommandProvider: { commands: ["groovy.findUsages", "groovy.goToSuperMetho
 ### Missing Capabilities
 ```java
 codeActionProvider: false (MISSING)
-codeLensProvider: false (MISSING)
-foldingRangeProvider: false (MISSING)
 semanticTokensProvider: false (MISSING)
 inlayHintProvider: false (MISSING)
 linkedEditingRangeProvider: false (MISSING)
-selectionRangeProvider: false (MISSING)
 documentLinkProvider: false (MISSING)
 colorProvider: false (MISSING)
-prepareRenameProvider: false (MISSING)
 onTypeFormattingProvider: false (MISSING)
 diagnosticProvider: false (MISSING - only push model)
 ```
@@ -146,18 +144,14 @@ diagnosticProvider: false (MISSING - only push model)
 ### 🔴 Critical (Blocks core workflows)
 1. ❌ Code Actions - Quick fixes, refactorings
 2. ❌ Enhanced Diagnostics - Type checking, unused declarations
-3. ❌ Code Lens - Reference counts
 
 ### 🟡 High (Significantly improves UX)
-4. ❌ Semantic Tokens - Proper syntax highlighting
-5. ❌ Folding Ranges - Code folding
-6. ❌ Inlay Hints - Parameter names
-7. ❌ Prepare Rename - Validation
+3. ❌ Semantic Tokens - Proper syntax highlighting
+4. ❌ Inlay Hints - Parameter names
 
 ### 🟢 Medium (Nice to have)
-8. ❌ Selection Range - Smart selection
-9. ❌ Document Links - Clickable URLs
-10. ❌ Pull Diagnostics - Client control
+5. ❌ Document Links - Clickable URLs
+6. ❌ Pull Diagnostics - Client control
 
 ### 🔵 Low (Polish features)
 11. ❌ Linked Editing - Simultaneous edits
@@ -171,15 +165,15 @@ diagnosticProvider: false (MISSING - only push model)
 | Category | Implemented | Total | Coverage |
 |----------|-------------|-------|----------|
 | **Text Synchronization** | 5/5 | 5 | 100% |
-| **Navigation** | 9/10 | 10 | 90% |
+| **Navigation** | 10/10 | 10 | 100% |
 | **Code Intelligence** | 3/5 | 5 | 60% |
 | **Diagnostics** | 1/3 | 3 | 33% |
 | **Code Editing** | 2/6 | 6 | 33% |
-| **Visual Features** | 2/11 | 11 | 18% |
+| **Visual Features** | 3/11 | 11 | 27% |
 | **Hierarchy** | 6/6 | 6 | 100% |
 | **Workspace** | 3/13 | 13 | 23% |
 | **Advanced** | 0/4 | 4 | 0% |
-| **TOTAL** | 31/63 | 63 | 49% |
+| **TOTAL** | 33/63 | 63 | 52% |
 
 ---
 
@@ -188,10 +182,10 @@ diagnosticProvider: false (MISSING - only push model)
 See `MISSING_FEATURES_ANALYSIS.md` for detailed implementation recommendations.
 
 **Quick wins for contributors:**
-1. Implement `textDocument/codeLens` (reference counts)
-2. Implement `textDocument/foldingRange` (code folding)
-3. Implement `textDocument/prepareRename` (validation)
-4. Implement `textDocument/selectionRange` (smart selection)
-5. Add basic `textDocument/codeAction` (organize imports)
+1. Add basic `textDocument/codeAction` (organize imports, quick fixes)
+2. Implement `textDocument/inlayHint` (parameter names)
+3. Implement `textDocument/documentLink` (clickable URLs)
+4. Add enhanced diagnostics (unused declarations, type checking)
+5. Implement `textDocument/semanticTokens` (syntax highlighting)
 
 **End of Checklist**
